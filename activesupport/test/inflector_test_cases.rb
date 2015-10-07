@@ -174,6 +174,17 @@ module InflectorTestCases
     "Test with malformed utf8 \251"       => "test-with-malformed-utf8"
   }
 
+  StringToParameterizedPreserveCase = {
+    "Donald E. Knuth"                     => "Donald-E-Knuth",
+    "Random text with *(bad)* characters" => "Random-text-with-bad-characters", 
+    "Allow_Under_Scores"                  => "Allow_Under_Scores", 
+    "Trailing bad characters!@#"          => "Trailing-bad-characters", 
+    "!@#Leading bad characters"           => "Leading-bad-characters", 
+    "Squeeze   separators"                => "Squeeze-separators", 
+    "Test with + sign"                    => "Test-with-sign", 
+    "Test with malformed utf8 \xA9"       => "Test-with-malformed-utf8"
+  }
+
   StringToParameterizeWithNoSeparator = {
     "Donald E. Knuth"                     => "donaldeknuth",
     "With-some-dashes"                    => "with-some-dashes",
@@ -185,16 +196,39 @@ module InflectorTestCases
     "Test with malformed utf8 \251"       => "testwithmalformedutf8"
   }
 
+  StringToParameterizePreserveCaseWithNoSeparator = {
+    "Donald E. Knuth"                     => "DonaldEKnuth",
+    "With-some-dashes"                    => "With-some-dashes",
+    "Random text with *(bad)* characters" => "Randomtextwithbadcharacters", 
+    "Trailing bad characters!@#"          => "Trailingbadcharacters", 
+    "!@#Leading bad characters"           => "Leadingbadcharacters", 
+    "Squeeze   separators"                => "Squeezeseparators", 
+    "Test with + sign"                    => "Testwithsign", 
+    "Test with malformed utf8 \xA9"       => "Testwithmalformedutf8"
+  }
+
   StringToParameterizeWithUnderscore = {
     "Donald E. Knuth"                     => "donald_e_knuth",
     "Random text with *(bad)* characters" => "random_text_with_bad_characters",
-    "With-some-dashes"                    => "with-some-dashes",
+    "With-some-dashes"                    => "with_some_dashes",
     "Retain_underscore"                   => "retain_underscore",
     "Trailing bad characters!@#"          => "trailing_bad_characters",
     "!@#Leading bad characters"           => "leading_bad_characters",
     "Squeeze   separators"                => "squeeze_separators",
     "Test with + sign"                    => "test_with_sign",
     "Test with malformed utf8 \251"       => "test_with_malformed_utf8"
+  }
+
+  StringToParameterizePreserceCaseWithUnderscore = {
+    "Donald E. Knuth"                     => "Donald_E_Knuth", 
+    "Random text with *(bad)* characters" => "Random_text_with_bad_characters",
+    "With-some-dashes"                    => "With_some_dashes", 
+    "Allow_Under_Scores"                  => "Allow_Under_Scores", 
+    "Trailing bad characters!@#"          => "Trailing_bad_characters", 
+    "!@#Leading bad characters"           => "Leading_bad_characters", 
+    "Squeeze   separators"                => "Squeeze_separators", 
+    "Test with + sign"                    => "Test_with_sign", 
+    "Test with malformed utf8 \xA9"       => "Test_with_malformed_utf8"
   }
 
   StringToParameterizedAndNormalized = {

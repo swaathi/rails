@@ -1,3 +1,12 @@
+* Updated `parameterize` to use keyword arguments and added the ability to preserve case of parameterized string.
+
+    Example:
+
+    parameterize("Donald E. Knuth", separator: '_') # => "donald_e_knuth"
+    parameterize("Donald E. Knuth", preserve_case: true) # => "Donald-E-Knuth"
+
+    *Swaathi Kakarla*
+
 *   Fix `ActiveSupport::Deprecation#deprecate_methods` to report using the
     current deprecator instance, where applicable.
 
