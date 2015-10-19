@@ -210,7 +210,7 @@ module InflectorTestCases
   StringToParameterizeWithUnderscore = {
     "Donald E. Knuth"                     => "donald_e_knuth",
     "Random text with *(bad)* characters" => "random_text_with_bad_characters",
-    "With-some-dashes"                    => "with_some_dashes",
+    "With-some-dashes"                    => "with-some-dashes",
     "Retain_underscore"                   => "retain_underscore",
     "Trailing bad characters!@#"          => "trailing_bad_characters",
     "!@#Leading bad characters"           => "leading_bad_characters",
@@ -222,7 +222,7 @@ module InflectorTestCases
   StringToParameterizePreserceCaseWithUnderscore = {
     "Donald E. Knuth"                     => "Donald_E_Knuth", 
     "Random text with *(bad)* characters" => "Random_text_with_bad_characters",
-    "With-some-dashes"                    => "With_some_dashes", 
+    "With-some-dashes"                    => "With-some-dashes", 
     "Allow_Under_Scores"                  => "Allow_Under_Scores", 
     "Trailing bad characters!@#"          => "Trailing_bad_characters", 
     "!@#Leading bad characters"           => "Leading_bad_characters", 

@@ -151,14 +151,14 @@ class StringInflectionsTest < ActiveSupport::TestCase
 
   def test_string_parameterized_no_separator
     StringToParameterizeWithNoSeparator.each do |normal, slugged|
-      assert_equal(normal.parameterized(separator: ''), slugged)
+      assert_equal(normal.parameterize(separator: ''), slugged)
     end
   end
 
   def test_string_parameterized_no_separator_deprecated
     StringToParameterizeWithNoSeparator.each do |normal, slugged|
-      assert_deprecated(/use the `separator` keyword argument instead/i) do
-        assert_equal(normal.parameterized(''), slugged)
+      assert_deprecated(/Passing the separator argument as a positional parameter is deprecated and will soon be removed. Use `separator: ''` instead./i) do
+        assert_equal(normal.parameterize(''), slugged)
       end
     end
   end
@@ -177,7 +177,7 @@ class StringInflectionsTest < ActiveSupport::TestCase
 
   def test_string_parameterized_underscore_deprecated
     StringToParameterizeWithUnderscore.each do |normal, slugged|
-      assert_deprecated(/use the `separator` keyword argument instead/i) do
+      assert_deprecated(/Passing the separator argument as a positional parameter is deprecated and will soon be removed. Use `separator: '_'` instead./i) do
         assert_equal(normal.parameterize('_'), slugged)
       end
     end
