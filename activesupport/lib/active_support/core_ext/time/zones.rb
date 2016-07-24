@@ -107,5 +107,24 @@ class Time
     def find_zone(time_zone)
       find_zone!(time_zone) rescue nil
     end
+
+    # Returns an offset time when provided with an offset value.
+    # Accepts offset values of format,
+  	# (+|-)(0-1)(1-12):(0-5)(0-9)
+    # Returns the same time for invalid offset values.
+    #
+  	# Example,
+  	# t = Time.now.utc
+  	# => Fri, 23 Jul 2016 07:56:38 UTC +00:00
+  	# t.offset("+05:30")
+  	# => Fri, 23 Jul 2016 13:26:38 UTC +00:00
+    def offset(offset_value)
+      if match = offset_value.match(/^(?:Z|([+-])((?:2[0-3]|[01][0-9])):([0-5][0-9]))$/)
+          set, hour, minute = match.captures
+        return self.send(set, hour.to_i.hour).send(set, minute.to_i.minute)
+      else
+        return self
+      end
+    end
   end
 end
