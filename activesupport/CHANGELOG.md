@@ -1,4 +1,18 @@
+<<<<<<< HEAD
+* Updated `parameterize` to use keyword arguments and added the ability to preserve case of parameterized string.
+
+    Example:
+
+    parameterize("Donald E. Knuth", separator: '_') # => "donald_e_knuth"
+    parameterize("Donald E. Knuth", preserve_case: true) # => "Donald-E-Knuth"
+
+    *Swaathi Kakarla*
+
+*   Fix `ActiveSupport::Deprecation#deprecate_methods` to report using the
+    current deprecator instance, where applicable.
+=======
 *   Introduce `not_in?` on `Object`.
+>>>>>>> f6b3e6c5ff83cf67df5aa48f8f54e9ebc056fee0
 
     As an opposite method for `in?`, `not_in?` provides equivalent support for exclusion. This turns this:
 
