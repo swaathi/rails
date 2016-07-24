@@ -203,9 +203,22 @@ class HasManyAssociationsTest < ActiveRecord::TestCase
 
     bulb = car.bulbs.create
     assert_equal 'defaulty', bulb.name
+  end
 
-    bulb = car.bulbs.create(:name => 'exotic')
+  def test_build_and_create_from_association_should_respect_passed_attributes_over_default_scope
+    car = Car.create(name: 'honda')
+
+    bulb = car.bulbs.build(name: 'exotic')
     assert_equal 'exotic', bulb.name
+
+    bulb = car.bulbs.create(name: 'exotic')
+    assert_equal 'exotic', bulb.name
+
+    bulb = car.awesome_bulbs.build(frickinawesome: false)
+    assert_equal false, bulb.frickinawesome
+
+    bulb = car.awesome_bulbs.create(frickinawesome: false)
+    assert_equal false, bulb.frickinawesome
   end
 
   def test_build_from_association_should_respect_scope
@@ -231,8 +244,9 @@ class HasManyAssociationsTest < ActiveRecord::TestCase
   def test_do_not_call_callbacks_for_delete_all
     car = Car.create(:name => 'honda')
     car.funky_bulbs.create!
+    assert_equal 1, car.funky_bulbs.count
     assert_nothing_raised { car.reload.funky_bulbs.delete_all }
-    assert_equal 0, Bulb.count, "bulbs should have been deleted using :delete_all strategy"
+    assert_equal 0, car.funky_bulbs.count, "bulbs should have been deleted using :delete_all strategy"
   end
 
   def test_delete_all_on_association_is_the_same_as_not_loaded
@@ -395,6 +409,16 @@ class HasManyAssociationsTest < ActiveRecord::TestCase
     end
 
     assert_no_queries do
+      bulbs.third_to_last()
+      bulbs.third_to_last({})
+    end
+
+    assert_no_queries do
+      bulbs.second_to_last()
+      bulbs.second_to_last({})
+    end
+
+    assert_no_queries do
       bulbs.last()
       bulbs.last({})
     end
@@ -413,6 +437,26 @@ class HasManyAssociationsTest < ActiveRecord::TestCase
     assert_equal 1, person.readers.length
     assert_equal post, person.readers.first.post
     assert_equal person, person.readers.first.person
+  end
+
+  def test_update_all_respects_association_scope
+    person = Person.new
+    person.first_name = 'Naruto'
+    person.references << Reference.new
+    person.id = 10
+    person.references
+    person.save!
+    assert_equal 1, person.references.update_all(favourite: true)
+  end
+
+  def test_exists_respects_association_scope
+    person = Person.new
+    person.first_name = 'Sasuke'
+    person.references << Reference.new
+    person.id = 10
+    person.references
+    person.save!
+    assert_predicate person.references, :exists?
   end
 
   def force_signal37_to_load_all_clients_of_firm
@@ -1292,7 +1336,7 @@ class HasManyAssociationsTest < ActiveRecord::TestCase
     assert_equal 2, summit.client_of
   end
 
-  def test_deleting_by_fixnum_id
+  def test_deleting_by_integer_id
     david = Developer.find(1)
 
     assert_difference 'david.projects.count', -1 do
@@ -1329,7 +1373,7 @@ class HasManyAssociationsTest < ActiveRecord::TestCase
     assert_equal 1, companies(:first_firm).clients_of_firm.reload.size
   end
 
-  def test_destroying_by_fixnum_id
+  def test_destroying_by_integer_id
     force_signal37_to_load_all_clients_of_firm
 
     assert_difference "Client.count", -1 do
@@ -2181,6 +2225,26 @@ class HasManyAssociationsTest < ActiveRecord::TestCase
     assert_equal [bulb1, bulb2], car.all_bulbs.sort_by(&:id)
   end
 
+  test "can unscope and where the default scope of the associated model" do
+    Car.has_many :other_bulbs, -> { unscope(where: [:name]).where(name: 'other') }, class_name: "Bulb"
+    car = Car.create!
+    bulb1 = Bulb.create! name: "defaulty", car: car
+    bulb2 = Bulb.create! name: "other",    car: car
+
+    assert_equal [bulb1], car.bulbs
+    assert_equal [bulb2], car.other_bulbs
+  end
+
+  test "can rewhere the default scope of the associated model" do
+    Car.has_many :old_bulbs, -> { rewhere(name: 'old') }, class_name: "Bulb"
+    car = Car.create!
+    bulb1 = Bulb.create! name: "defaulty", car: car
+    bulb2 = Bulb.create! name: "old",      car: car
+
+    assert_equal [bulb1], car.bulbs
+    assert_equal [bulb2], car.old_bulbs
+  end
+
   test 'unscopes the default scope of associated model when used with include' do
     car = Car.create!
     bulb = Bulb.create! name: "other", car: car
@@ -2238,7 +2302,7 @@ class HasManyAssociationsTest < ActiveRecord::TestCase
     assert_equal [], authors(:david).posts_with_signature.map(&:title)
   end
 
-  test 'associations autosaves when object is already persited' do
+  test 'associations autosaves when object is already persisted' do
     bulb = Bulb.create!
     tyre = Tyre.create!
 
@@ -2313,6 +2377,12 @@ class HasManyAssociationsTest < ActiveRecord::TestCase
     car.bulbs = [second_bulb, same_bulb]
 
     assert_equal [first_bulb, second_bulb], car.bulbs
+  end
+
+  test 'double insertion of new object to association when same association used in the after create callback of a new object' do
+    car = Car.create!
+    car.bulbs << TrickyBulb.new
+    assert_equal 1, car.bulbs.size
   end
 
   def test_association_force_reload_with_only_true_is_deprecated

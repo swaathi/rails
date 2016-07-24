@@ -9,6 +9,10 @@ module RenderTestCases
     @assigns = { :secret => 'in the sauce' }
     @view = Class.new(ActionView::Base) do
       def view_cache_dependencies; end
+
+      def fragment_cache_key(key)
+        ActiveSupport::Cache.expand_cache_key(key, :views)
+      end
     end.new(paths, @assigns)
 
     @controller_view = TestController.new.view_context
@@ -67,7 +71,7 @@ module RenderTestCases
     e = assert_raise ActionView::Template::Error do
       @view.render(:template => "with_format", :formats => [:json])
     end
-    assert_includes(e.message, "Missing partial /_missing with {:locale=>[:en], :formats=>[:json], :variants=>[], :handlers=>[:raw, :erb, :builder, :ruby]}.")
+    assert_includes(e.message, "Missing partial /_missing with {:locale=>[:en], :formats=>[:json], :variants=>[], :handlers=>[:raw, :erb, :html, :builder, :ruby]}.")
   end
 
   def test_render_file_with_locale
@@ -94,6 +98,13 @@ module RenderTestCases
 
   def test_render_raw_template_with_quotes
     assert_equal %q;Here are some characters: !@#$%^&*()-="'}{`; + "\n", @view.render(:template => "plain_text_with_characters")
+  end
+
+  def test_render_raw_is_html_safe_and_does_not_escape_output
+    buffer = ActiveSupport::SafeBuffer.new
+    buffer << @view.render(file: "plain_text")
+    assert_equal true, buffer.html_safe?
+    assert_equal buffer, "<%= hello_world %>\n"
   end
 
   def test_render_ruby_template_with_handlers
@@ -142,6 +153,13 @@ module RenderTestCases
 
   def test_render_partial_from_default
     assert_equal "only partial", @view.render("test/partial_only")
+  end
+
+  def test_render_outside_path
+    assert File.exist?(File.join(File.dirname(__FILE__), '../../test/abstract_unit.rb'))
+    assert_raises ActionView::MissingTemplate do
+      @view.render(:template => "../\\../test/abstract_unit.rb")
+    end
   end
 
   def test_render_partial
@@ -196,6 +214,10 @@ module RenderTestCases
     assert_nothing_raised { @view.render(:partial => "test/a-in") }
   end
 
+  def test_render_partial_with_unicode_text
+    assert_nothing_raised { @view.render(:partial => "test/🍣") }
+  end
+
   def test_render_partial_with_invalid_option_as
     e = assert_raises(ArgumentError) { @view.render(:partial => "test/partial_only", :as => 'a-in') }
     assert_equal "The value (a-in) of the option `as` is not a valid Ruby identifier; " +
@@ -215,13 +237,13 @@ module RenderTestCases
     assert_match %r!method.*doesnt_exist!, e.message
     assert_equal "", e.sub_template_message
     assert_equal "1", e.line_number
-    assert_equal "1: <%= doesnt_exist %>", e.annoted_source_code.strip
+    assert_equal "1: <%= doesnt_exist %>", e.annoted_source_code[0].strip
     assert_equal File.expand_path("#{FIXTURE_LOAD_PATH}/test/_raise.html.erb"), e.file_name
   end
 
   def test_render_error_indentation
     e = assert_raises(ActionView::Template::Error) { @view.render(:partial => "test/raise_indentation") }
-    error_lines = e.annoted_source_code.split("\n")
+    error_lines = e.annoted_source_code
     assert_match %r!error\shere!, e.message
     assert_equal "11", e.line_number
     assert_equal "     9: <p>Ninth paragraph</p>", error_lines.second
@@ -241,12 +263,14 @@ module RenderTestCases
     assert_match %r!method.*doesnt_exist!, e.message
     assert_equal "", e.sub_template_message
     assert_equal "1", e.line_number
-    assert_equal "1: <%= doesnt_exist %>", e.annoted_source_code.strip
+    assert_equal "1: <%= doesnt_exist %>", e.annoted_source_code[0].strip
     assert_equal File.expand_path("#{FIXTURE_LOAD_PATH}/test/_raise.html.erb"), e.file_name
   end
 
   def test_render_object
     assert_equal "Hello: david", @view.render(:partial => "test/customer", :object => Customer.new("david"))
+    assert_equal "FalseClass", @view.render(:partial => "test/klass", :object => false)
+    assert_equal "NilClass", @view.render(:partial => "test/klass", :object => nil)
   end
 
   def test_render_object_with_array
@@ -255,6 +279,11 @@ module RenderTestCases
 
   def test_render_partial_collection
     assert_equal "Hello: davidHello: mary", @view.render(:partial => "test/customer", :collection => [ Customer.new("david"), Customer.new("mary") ])
+  end
+
+  def test_render_partial_collection_with_partial_name_containing_dot
+    assert_equal "Hello: davidHello: mary",
+      @view.render(:partial => "test/customer.mobile", :collection => [ Customer.new("david"), Customer.new("mary") ])
   end
 
   def test_render_partial_collection_as_by_string
@@ -352,8 +381,8 @@ module RenderTestCases
     exception = assert_raises ActionView::Template::Error do
       @controller_view.render("partial_name_local_variable")
     end
-    assert_instance_of NameError, exception.original_exception
-    assert_equal :partial_name_local_variable, exception.original_exception.name
+    assert_instance_of NameError, exception.cause
+    assert_equal :partial_name_local_variable, exception.cause.name
   end
 
   # TODO: The reason for this test is unclear, improve documentation
@@ -459,6 +488,11 @@ module RenderTestCases
   def test_render_with_layout_which_renders_another_partial
     assert_equal %(partial html\nHello world!\n),
       @view.render(:file => "test/hello_world", :layout => "layouts/yield_with_render_partial_inside")
+  end
+
+  def test_render_partial_with_html_only_extension
+    assert_equal %(<h1>partial html</h1>\nHello world!\n),
+      @view.render(:file => "test/hello_world", :layout => "layouts/render_partial_html")
   end
 
   def test_render_layout_with_block_and_yield
@@ -590,14 +624,14 @@ class LazyViewRenderTest < ActiveSupport::TestCase
   def test_render_utf8_template_with_incompatible_external_encoding
     with_external_encoding Encoding::SHIFT_JIS do
       e = assert_raises(ActionView::Template::Error) { @view.render(:file => "test/utf8", :formats => [:html], :layouts => "layouts/yield") }
-      assert_match 'Your template was not saved as valid Shift_JIS', e.original_exception.message
+      assert_match 'Your template was not saved as valid Shift_JIS', e.cause.message
     end
   end
 
   def test_render_utf8_template_with_partial_with_incompatible_encoding
     with_external_encoding Encoding::SHIFT_JIS do
       e = assert_raises(ActionView::Template::Error) { @view.render(:file => "test/utf8_magic_with_bare_partial", :formats => [:html], :layouts => "layouts/yield") }
-      assert_match 'Your template was not saved as valid Shift_JIS', e.original_exception.message
+      assert_match 'Your template was not saved as valid Shift_JIS', e.cause.message
     end
   end
 
@@ -610,56 +644,59 @@ class LazyViewRenderTest < ActiveSupport::TestCase
   end
 end
 
-class CachedCollectionViewRenderTest < CachedViewRenderTest
+class CachedCollectionViewRenderTest < ActiveSupport::TestCase
   class CachedCustomer < Customer; end
 
+  include RenderTestCases
+
+  # Ensure view path cache is primed
+  setup do
+    view_paths = ActionController::Base.view_paths
+    assert_equal ActionView::OptimizedFileSystemResolver, view_paths.first.class
+
+    ActionView::PartialRenderer.collection_cache = ActiveSupport::Cache::MemoryStore.new
+
+    setup_view(view_paths)
+  end
+
   teardown do
-    ActionView::PartialRenderer.collection_cache.clear
+    GC.start
+    I18n.reload!
   end
 
-  test "with custom key" do
-    customer = Customer.new("david")
-    key = cache_key([customer, 'key'], "test/_customer")
+  test "collection caching does not cache by default" do
+    customer = Customer.new("david", 1)
+    key = cache_key(customer, "test/_customer")
 
-    ActionView::PartialRenderer.collection_cache.write(key, 'Hello')
+    ActionView::PartialRenderer.collection_cache.write(key, 'Cached')
 
-    assert_equal "Hello",
-      @view.render(partial: "test/customer", collection: [customer], cache: ->(item) { [item, 'key'] })
+    assert_not_equal "Cached",
+      @view.render(partial: "test/customer", collection: [customer])
   end
 
-  test "with caching with custom key and rendering with different key" do
-    customer = Customer.new("david")
-    key = cache_key([customer, 'key'], "test/_customer")
+  test "collection caching with partial that doesn't use fragment caching" do
+    customer = Customer.new("david", 1)
+    key = cache_key(customer, "test/_customer")
 
-    ActionView::PartialRenderer.collection_cache.write(key, 'Hello')
+    ActionView::PartialRenderer.collection_cache.write(key, 'Cached')
 
-    assert_equal "Hello: david",
-      @view.render(partial: "test/customer", collection: [customer], cache: ->(item) { [item, 'another_key'] })
+    assert_equal "Cached",
+      @view.render(partial: "test/customer", collection: [customer], cached: true)
   end
 
-  test "automatic caching with inferred cache name" do
-    customer = CachedCustomer.new("david")
+  test "collection caching with cached true" do
+    customer = CachedCustomer.new("david", 1)
     key = cache_key(customer, "test/_cached_customer")
 
     ActionView::PartialRenderer.collection_cache.write(key, 'Cached')
 
     assert_equal "Cached",
-      @view.render(partial: "test/cached_customer", collection: [customer])
-  end
-
-  test "automatic caching with as name" do
-    customer = CachedCustomer.new("david")
-    key = cache_key(customer, "test/_cached_customer_as")
-
-    ActionView::PartialRenderer.collection_cache.write(key, 'Cached')
-
-    assert_equal "Cached",
-      @view.render(partial: "test/cached_customer_as", collection: [customer], as: :buyer)
+      @view.render(partial: "test/cached_customer", collection: [customer], cached: true)
   end
 
   private
-    def cache_key(names, virtual_path)
+    def cache_key(*names, virtual_path)
       digest = ActionView::Digestor.digest name: virtual_path, finder: @view.lookup_context, dependencies: []
-      @view.fragment_cache_key([ *Array(names), digest ])
+      @view.fragment_cache_key([ *names, digest ])
     end
 end

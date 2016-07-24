@@ -22,13 +22,21 @@ module ActiveRecord
       def sanitize_sql(sql)
         sql
       end
+
+      def sanitize_sql_for_order(sql)
+        sql
+      end
+
+      def arel_attribute(name, table)
+        table[name]
+      end
     end
 
     def relation
       @relation ||= Relation.new FakeKlass.new('posts'), Post.arel_table, Post.predicate_builder
     end
 
-    (Relation::MULTI_VALUE_METHODS - [:references, :extending, :order, :unscope, :select]).each do |method|
+    (Relation::MULTI_VALUE_METHODS - [:references, :extending, :order, :unscope, :select, :left_joins]).each do |method|
       test "##{method}!" do
         assert relation.public_send("#{method}!", :foo).equal?(relation)
         assert_equal [:foo], relation.public_send("#{method}_values")
@@ -36,8 +44,8 @@ module ActiveRecord
     end
 
     test "#_select!" do
-      assert relation.public_send("_select!", :foo).equal?(relation)
-      assert_equal [:foo], relation.public_send("select_values")
+      assert relation._select!(:foo).equal?(relation)
+      assert_equal [:foo], relation.select_values
     end
 
     test '#order!' do

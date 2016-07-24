@@ -1,5 +1,3 @@
-require File.expand_path('../../../load_paths', __FILE__)
-
 $:.unshift(File.dirname(__FILE__) + '/lib')
 $:.unshift(File.dirname(__FILE__) + '/fixtures/helpers')
 $:.unshift(File.dirname(__FILE__) + '/fixtures/alternate_helpers')
@@ -20,7 +18,11 @@ rescue LoadError
   puts "'drb/unix' is not available"
 end
 
-PROCESS_COUNT = (ENV['N'] || 4).to_i
+if ENV['TRAVIS']
+  PROCESS_COUNT = 0
+else
+  PROCESS_COUNT = (ENV['N'] || 4).to_i
+end
 
 require 'active_support/testing/autorun'
 require 'abstract_controller'
@@ -31,8 +33,6 @@ require 'action_view/testing/resolvers'
 require 'action_dispatch'
 require 'active_support/dependencies'
 require 'active_model'
-require 'active_record'
-require 'action_controller/caching'
 
 require 'pp' # require 'pp' early to prevent hidden_methods from not picking up the pretty-print methods until too late
 
@@ -56,16 +56,14 @@ ActiveSupport::Deprecation.debug = true
 # Disable available locale checks to avoid warnings running the test suite.
 I18n.enforce_available_locales = false
 
-# Register danish language for testing
-I18n.backend.store_translations 'da', {}
-I18n.backend.store_translations 'pt-BR', {}
-
 FIXTURE_LOAD_PATH = File.join(File.dirname(__FILE__), 'fixtures')
 
 SharedTestRoutes = ActionDispatch::Routing::RouteSet.new
 
 SharedTestRoutes.draw do
-  get ':controller(/:action)'
+  ActiveSupport::Deprecation.silence do
+    get ':controller(/:action)'
+  end
 end
 
 module ActionDispatch
@@ -114,7 +112,9 @@ class ActionDispatch::IntegrationTest < ActiveSupport::TestCase
   self.app = build_app
 
   app.routes.draw do
-    get ':controller(/:action)'
+    ActiveSupport::Deprecation.silence do
+      get ':controller(/:action)'
+    end
   end
 
   class DeadEndRoutes < ActionDispatch::Routing::RouteSet
@@ -250,24 +250,6 @@ end
 class ::ApplicationController < ActionController::Base
 end
 
-class Workshop
-  extend ActiveModel::Naming
-  include ActiveModel::Conversion
-  attr_accessor :id
-
-  def initialize(id)
-    @id = id
-  end
-
-  def persisted?
-    id.present?
-  end
-
-  def to_s
-    id.to_s
-  end
-end
-
 module ActionDispatch
   class DebugExceptions
     private
@@ -376,25 +358,9 @@ class ResourcesController < ActionController::Base
   alias_method :show, :index
 end
 
-class ThreadsController  < ResourcesController; end
-class MessagesController < ResourcesController; end
 class CommentsController < ResourcesController; end
-class ReviewsController < ResourcesController; end
-
 class AccountsController <  ResourcesController; end
-class AdminController   <  ResourcesController; end
-class ProductsController < ResourcesController; end
 class ImagesController < ResourcesController; end
-
-module Backoffice
-  class ProductsController < ResourcesController; end
-  class ImagesController < ResourcesController; end
-
-  module Admin
-    class ProductsController < ResourcesController; end
-    class ImagesController < ResourcesController; end
-  end
-end
 
 # Skips the current run on Rubinius using Minitest::Assertions#skip
 def rubinius_skip(message = '')

@@ -149,7 +149,7 @@ module ActiveRecord
   class HasOneThroughNestedAssociationsAreReadonly < ThroughNestedAssociationsAreReadonly #:nodoc:
   end
 
-  # This error is raised when trying to eager load a poloymorphic association using a JOIN.
+  # This error is raised when trying to eager load a polymorphic association using a JOIN.
   # Eager loading polymorphic associations is only possible with
   # {ActiveRecord::Relation#preload}[rdoc-ref:QueryMethods#preload].
   class EagerLoadPolymorphicError < ActiveRecordError
@@ -300,10 +300,10 @@ module ActiveRecord
     #
     # === A word of warning
     #
-    # Don't create associations that have the same name as instance methods of
-    # ActiveRecord::Base. Since the association adds a method with that name to
-    # its model, it will override the inherited method and break things.
-    # For instance, +attributes+ and +connection+ would be bad choices for association names.
+    # Don't create associations that have the same name as {instance methods}[rdoc-ref:ActiveRecord::Core] of
+    # <tt>ActiveRecord::Base</tt>. Since the association adds a method with that name to
+    # its model, using an association with the same name as one provided by <tt>ActiveRecord::Base</tt> will override the method inherited through <tt>ActiveRecord::Base</tt> and will break things.
+    # For instance, +attributes+ and +connection+ would be bad choices for association names, because those names already exist in the list of <tt>ActiveRecord::Base</tt> instance methods.
     #
     # == Auto-generated methods
     # See also Instance Public methods below for more details.
@@ -318,7 +318,7 @@ module ActiveRecord
     #   create_other(attributes={})       |     X      |              |    X
     #   create_other!(attributes={})      |     X      |              |    X
     #
-    # ===Collection associations (one-to-many / many-to-many)
+    # === Collection associations (one-to-many / many-to-many)
     #                                     |       |          | has_many
     #   generated methods                 | habtm | has_many | :through
     #   ----------------------------------+-------+----------+----------
@@ -362,7 +362,7 @@ module ActiveRecord
     #     end
     #   end
     #
-    # If your model class is <tt>Project</tt>, the module is
+    # If your model class is <tt>Project</tt>, then the module is
     # named <tt>Project::GeneratedAssociationMethods</tt>. The +GeneratedAssociationMethods+ module is
     # included in the model class immediately after the (anonymous) generated attributes methods
     # module, meaning an association will override the methods for an attribute with the same name.
@@ -504,11 +504,11 @@ module ActiveRecord
     #
     # == Customizing the query
     #
-    # \Associations are built from <tt>Relation</tt>s, and you can use the Relation syntax
+    # \Associations are built from <tt>Relation</tt> objects, and you can use the Relation syntax
     # to customize them. For example, to add a condition:
     #
     #   class Blog < ActiveRecord::Base
-    #     has_many :published_posts, -> { where published: true }, class_name: 'Post'
+    #     has_many :published_posts, -> { where(published: true) }, class_name: 'Post'
     #   end
     #
     # Inside the <tt>-> { ... }</tt> block you can use all of the usual Relation methods.
@@ -520,7 +520,7 @@ module ActiveRecord
     # events that occur on the user's birthday:
     #
     #   class User < ActiveRecord::Base
-    #     has_many :birthday_events, ->(user) { where starts_on: user.birthday }, class_name: 'Event'
+    #     has_many :birthday_events, ->(user) { where(starts_on: user.birthday) }, class_name: 'Event'
     #   end
     #
     # Note: Joining, eager loading and preloading of these associations is not fully possible.
@@ -845,8 +845,8 @@ module ActiveRecord
     #   Post.includes(:author).each do |post|
     #
     # This references the name of the #belongs_to association that also used the <tt>:author</tt>
-    # symbol. After loading the posts, find will collect the +author_id+ from each one and load
-    # all the referenced authors with one query. Doing so will cut down the number of queries
+    # symbol. After loading the posts, +find+ will collect the +author_id+ from each one and load
+    # all of the referenced authors with one query. Doing so will cut down the number of queries
     # from 201 to 102.
     #
     # We can improve upon the situation further by referencing both associations in the finder with:
@@ -873,7 +873,7 @@ module ActiveRecord
     #
     # Since only one table is loaded at a time, conditions or orders cannot reference tables
     # other than the main one. If this is the case, Active Record falls back to the previously
-    # used LEFT OUTER JOIN based strategy. For example:
+    # used <tt>LEFT OUTER JOIN</tt> based strategy. For example:
     #
     #   Post.includes([:author, :comments]).where(['comments.approved = ?', true])
     #
@@ -881,21 +881,21 @@ module ActiveRecord
     # <tt>LEFT OUTER JOIN comments ON comments.post_id = posts.id</tt> and
     # <tt>LEFT OUTER JOIN authors ON authors.id = posts.author_id</tt>. Note that using conditions
     # like this can have unintended consequences.
-    # In the above example posts with no approved comments are not returned at all, because
+    # In the above example, posts with no approved comments are not returned at all because
     # the conditions apply to the SQL statement as a whole and not just to the association.
     #
     # You must disambiguate column references for this fallback to happen, for example
     # <tt>order: "author.name DESC"</tt> will work but <tt>order: "name DESC"</tt> will not.
     #
-    # If you want to load all posts (including posts with no approved comments) then write
-    # your own LEFT OUTER JOIN query using ON
+    # If you want to load all posts (including posts with no approved comments), then write
+    # your own <tt>LEFT OUTER JOIN</tt> query using <tt>ON</tt>:
     #
     #   Post.joins("LEFT OUTER JOIN comments ON comments.post_id = posts.id AND comments.approved = '1'")
     #
-    # In this case it is usually more natural to include an association which has conditions defined on it:
+    # In this case, it is usually more natural to include an association which has conditions defined on it:
     #
     #   class Post < ActiveRecord::Base
-    #     has_many :approved_comments, -> { where approved: true }, class_name: 'Comment'
+    #     has_many :approved_comments, -> { where(approved: true) }, class_name: 'Comment'
     #   end
     #
     #   Post.includes(:approved_comments)
@@ -924,7 +924,7 @@ module ActiveRecord
     #
     # This will execute one query to load the addresses and load the addressables with one
     # query per addressable type.
-    # For example if all the addressables are either of class Person or Company then a total
+    # For example, if all the addressables are either of class Person or Company, then a total
     # of 3 queries will be executed. The list of addressable types to load is determined on
     # the back of the addresses loaded. This is not supported if Active Record has to fallback
     # to the previous implementation of eager loading and will raise ActiveRecord::EagerLoadPolymorphicError.
@@ -1015,7 +1015,7 @@ module ActiveRecord
     #
     # == Bi-directional associations
     #
-    # When you specify an association there is usually an association on the associated model
+    # When you specify an association, there is usually an association on the associated model
     # that specifies the same relationship in reverse. For example, with the following models:
     #
     #    class Dungeon < ActiveRecord::Base
@@ -1032,7 +1032,7 @@ module ActiveRecord
     #    end
     #
     # The +traps+ association on +Dungeon+ and the +dungeon+ association on +Trap+ are
-    # the inverse of each other and the inverse of the +dungeon+ association on +EvilWizard+
+    # the inverse of each other, and the inverse of the +dungeon+ association on +EvilWizard+
     # is the +evil_wizard+ association on +Dungeon+ (and vice-versa). By default,
     # Active Record can guess the inverse of the association based on the name
     # of the class. The result is the following:
@@ -1062,7 +1062,7 @@ module ActiveRecord
     #
     # * does not work with <tt>:through</tt> associations.
     # * does not work with <tt>:polymorphic</tt> associations.
-    # * for #belongs_to associations #has_many inverse associations are ignored.
+    # * inverse associations for #belongs_to associations #has_many are ignored.
     #
     # For more information, see the documentation for the +:inverse_of+ option.
     #
@@ -1070,7 +1070,7 @@ module ActiveRecord
     #
     # === Dependent associations
     #
-    # #has_many, #has_one and #belongs_to associations support the <tt>:dependent</tt> option.
+    # #has_many, #has_one, and #belongs_to associations support the <tt>:dependent</tt> option.
     # This allows you to specify that associated records should be deleted when the owner is
     # deleted.
     #
@@ -1164,6 +1164,7 @@ module ActiveRecord
       #   Adds one or more objects to the collection by setting their foreign keys to the collection's primary key.
       #   Note that this operation instantly fires update SQL without waiting for the save or update call on the
       #   parent object, unless the parent object is a new record.
+      #   This will also run validations and callbacks of associated object(s).
       # [collection.delete(object, ...)]
       #   Removes one or more objects from the collection by setting their foreign keys to +NULL+.
       #   Objects will be in addition destroyed if they're associated with <tt>dependent: :destroy</tt>,
@@ -1181,7 +1182,8 @@ module ActiveRecord
       # [collection=objects]
       #   Replaces the collections content by deleting and adding objects as appropriate. If the <tt>:through</tt>
       #   option is true callbacks in the join models are triggered except destroy callbacks, since deletion is
-      #   direct.
+      #   direct by default. You can specify <tt>dependent: :destroy</tt> or
+      #   <tt>dependent: :nullify</tt> to override this.
       # [collection_singular_ids]
       #   Returns an array of the associated objects' ids
       # [collection_singular_ids=ids]
@@ -1324,7 +1326,8 @@ module ActiveRecord
       #   Specifies type of the source association used by #has_many <tt>:through</tt> queries where the source
       #   association is a polymorphic #belongs_to.
       # [:validate]
-      #   If +false+, don't validate the associated objects when saving the parent object. true by default.
+      #   When set to +true+, validates new objects added to association when saving the parent object. +true+ by default.
+      #   If you want to ensure associated objects are revalidated on every update, use +validates_associated+.
       # [:autosave]
       #   If true, always save the associated objects or destroy them if marked for destruction,
       #   when saving the parent object. If false, never save or destroy the associated objects.
@@ -1345,10 +1348,10 @@ module ActiveRecord
       #   association objects.
       #
       # Option examples:
-      #   has_many :comments, -> { order "posted_on" }
-      #   has_many :comments, -> { includes :author }
+      #   has_many :comments, -> { order("posted_on") }
+      #   has_many :comments, -> { includes(:author) }
       #   has_many :people, -> { where(deleted: false).order("name") }, class_name: "Person"
-      #   has_many :tracks, -> { order "position" }, dependent: :destroy
+      #   has_many :tracks, -> { order("position") }, dependent: :destroy
       #   has_many :comments, dependent: :nullify
       #   has_many :tags, as: :taggable
       #   has_many :reports, -> { readonly }
@@ -1454,7 +1457,8 @@ module ActiveRecord
       #   Specifies type of the source association used by #has_one <tt>:through</tt> queries where the source
       #   association is a polymorphic #belongs_to.
       # [:validate]
-      #   If +false+, don't validate the associated object when saving the parent object. +false+ by default.
+      #   When set to +true+, validates new objects added to association when saving the parent object. +false+ by default.
+      #   If you want to ensure associated objects are revalidated on every update, use +validates_associated+.
       # [:autosave]
       #   If true, always save the associated object or destroy it if marked for destruction,
       #   when saving the parent object. If false, never save or destroy the associated object.
@@ -1476,12 +1480,12 @@ module ActiveRecord
       #   has_one :credit_card, dependent: :destroy  # destroys the associated credit card
       #   has_one :credit_card, dependent: :nullify  # updates the associated records foreign
       #                                                 # key value to NULL rather than destroying it
-      #   has_one :last_comment, -> { order 'posted_on' }, class_name: "Comment"
-      #   has_one :project_manager, -> { where role: 'project_manager' }, class_name: "Person"
+      #   has_one :last_comment, -> { order('posted_on') }, class_name: "Comment"
+      #   has_one :project_manager, -> { where(role: 'project_manager') }, class_name: "Person"
       #   has_one :attachment, as: :attachable
       #   has_one :boss, -> { readonly }
       #   has_one :club, through: :membership
-      #   has_one :primary_address, -> { where primary: true }, through: :addressables, source: :addressable
+      #   has_one :primary_address, -> { where(primary: true) }, through: :addressables, source: :addressable
       #   has_one :credit_card, required: true
       def has_one(name, scope = nil, options = {})
         reflection = Builder::HasOne.build(self, name, scope, options)
@@ -1578,7 +1582,8 @@ module ActiveRecord
       #   Note: If you've enabled the counter cache, then you may want to add the counter cache attribute
       #   to the +attr_readonly+ list in the associated classes (e.g. <tt>class Post; attr_readonly :comments_count; end</tt>).
       # [:validate]
-      #   If +false+, don't validate the associated objects when saving the parent object. +false+ by default.
+      #   When set to +true+, validates new objects added to association when saving the parent object. +false+ by default.
+      #   If you want to ensure associated objects are revalidated on every update, use +validates_associated+.
       # [:autosave]
       #   If true, always save the associated object or destroy it if marked for destruction, when
       #   saving the parent object.
@@ -1591,6 +1596,8 @@ module ActiveRecord
       #   If true, the associated object will be touched (the updated_at/on attributes set to current time)
       #   when this record is either saved or destroyed. If you specify a symbol, that attribute
       #   will be updated with the current time in addition to the updated_at/on attribute.
+      #   Please note that with touching no validation is performed and only the +after_touch+,
+      #   +after_commit+ and +after_rollback+ callbacks are executed.
       # [:inverse_of]
       #   Specifies the name of the #has_one or #has_many association on the associated
       #   object that is the inverse of this #belongs_to association. Does not work in
@@ -1639,7 +1646,7 @@ module ActiveRecord
       # The join table should not have a primary key or a model associated with it. You must manually generate the
       # join table with a migration such as this:
       #
-      #   class CreateDevelopersProjectsJoinTable < ActiveRecord::Migration
+      #   class CreateDevelopersProjectsJoinTable < ActiveRecord::Migration[5.0]
       #     def change
       #       create_join_table :developers, :projects
       #     end
@@ -1721,7 +1728,7 @@ module ActiveRecord
       # query when you access the associated collection.
       #
       # Scope examples:
-      #   has_and_belongs_to_many :projects, -> { includes :milestones, :manager }
+      #   has_and_belongs_to_many :projects, -> { includes(:milestones, :manager) }
       #   has_and_belongs_to_many :categories, ->(category) {
       #     where("default_category = ?", category.name)
       #   }
@@ -1762,7 +1769,8 @@ module ActiveRecord
       #   So if a Person class makes a #has_and_belongs_to_many association to Project,
       #   the association will use "project_id" as the default <tt>:association_foreign_key</tt>.
       # [:validate]
-      #   If +false+, don't validate the associated objects when saving the parent object. +true+ by default.
+      #   When set to +true+, validates new objects added to association when saving the parent object. +true+ by default.
+      #   If you want to ensure associated objects are revalidated on every update, use +validates_associated+.
       # [:autosave]
       #   If true, always save the associated objects or destroy them if marked for destruction, when
       #   saving the parent object.
@@ -1774,7 +1782,7 @@ module ActiveRecord
       #
       # Option examples:
       #   has_and_belongs_to_many :projects
-      #   has_and_belongs_to_many :projects, -> { includes :milestones, :manager }
+      #   has_and_belongs_to_many :projects, -> { includes(:milestones, :manager) }
       #   has_and_belongs_to_many :nations, class_name: "Country"
       #   has_and_belongs_to_many :categories, join_table: "prods_cats"
       #   has_and_belongs_to_many :categories, -> { readonly }

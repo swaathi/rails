@@ -1,8 +1,6 @@
 module ActiveRecord
   module Tasks # :nodoc:
     class MySQLDatabaseTasks # :nodoc:
-      DEFAULT_CHARSET     = ENV['CHARSET']   || 'utf8'
-      DEFAULT_COLLATION   = ENV['COLLATION'] || 'utf8_unicode_ci'
       ACCESS_DENIED_ERROR = 1045
 
       delegate :connection, :establish_connection, to: ActiveRecord::Base
@@ -60,6 +58,7 @@ module ActiveRecord
         args.concat(["--result-file", "#{filename}"])
         args.concat(["--no-data"])
         args.concat(["--routines"])
+        args.concat(["--skip-comments"])
         args.concat(["#{configuration['database']}"])
 
         run_cmd('mysqldump', args, 'dumping')
@@ -87,12 +86,6 @@ module ActiveRecord
         Hash.new.tap do |options|
           options[:charset]     = configuration['encoding']   if configuration.include? 'encoding'
           options[:collation]   = configuration['collation']  if configuration.include? 'collation'
-
-          # Set default charset only when collation isn't set.
-          options[:charset]   ||= DEFAULT_CHARSET unless options[:collation]
-
-          # Set default collation only when charset is also default.
-          options[:collation] ||= DEFAULT_COLLATION if options[:charset] == DEFAULT_CHARSET
         end
       end
 
@@ -102,8 +95,6 @@ module ActiveRecord
           ArJdbcMySQL::Error
         elsif defined?(Mysql2)
           Mysql2::Error
-        elsif defined?(Mysql)
-          Mysql::Error
         else
           StandardError
         end
@@ -140,7 +131,7 @@ IDENTIFIED BY '#{configuration['password']}' WITH GRANT OPTION;
           'sslca'     => '--ssl-ca',
           'sslcert'   => '--ssl-cert',
           'sslcapath' => '--ssl-capath',
-          'sslcipher' => '--ssh-cipher',
+          'sslcipher' => '--ssl-cipher',
           'sslkey'    => '--ssl-key'
         }.map { |opt, arg| "#{arg}=#{configuration[opt]}" if configuration[opt] }.compact
 

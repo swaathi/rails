@@ -7,7 +7,6 @@ module ApplicationTests
 
       def setup
         build_app
-        boot_rails
       end
 
       def teardown
@@ -32,6 +31,15 @@ module ApplicationTests
           FileUtils.remove_dir('tmp')
           `rake restart`
           assert File.exist?('tmp/restart.txt')
+        end
+      end
+
+      test 'rake restart removes server.pid also' do
+        Dir.chdir(app_path) do
+          FileUtils.mkdir_p("tmp/pids")
+          FileUtils.touch("tmp/pids/server.pid")
+          `rake restart`
+          assert_not File.exist?("tmp/pids/server.pid")
         end
       end
     end

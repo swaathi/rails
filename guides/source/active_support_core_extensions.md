@@ -248,6 +248,13 @@ end
 @person.try { |p| "#{p.first_name} #{p.last_name}" }
 ```
 
+Note that `try` will swallow no-method errors, returning nil instead. If you want to protect against typos, use `try!` instead:
+
+```ruby
+@number.try(:nest)  # => nil
+@number.try!(:nest) # NoMethodError: undefined method `nest' for 1:Integer
+```
+
 NOTE: Defined in `active_support/core_ext/object/try.rb`.
 
 ### `class_eval(*args, &block)`
@@ -390,7 +397,7 @@ The method `with_options` provides a way to factor out common options in a serie
 Given a default options hash, `with_options` yields a proxy object to a block. Within the block, methods called on the proxy are forwarded to the receiver with their options merged. For example, you get rid of the duplication in:
 
 ```ruby
-class Account < ActiveRecord::Base
+class Account < ApplicationRecord
   has_many :customers, dependent: :destroy
   has_many :products,  dependent: :destroy
   has_many :invoices,  dependent: :destroy
@@ -401,7 +408,7 @@ end
 this way:
 
 ```ruby
-class Account < ActiveRecord::Base
+class Account < ApplicationRecord
   with_options dependent: :destroy do |assoc|
     assoc.has_many :customers
     assoc.has_many :products
@@ -453,7 +460,7 @@ NOTE: Defined in `active_support/core_ext/object/instance_variables.rb`.
 
 #### `instance_variable_names`
 
-The method `instance_variable_names` returns an array.  Each name includes the "@" sign.
+The method `instance_variable_names` returns an array. Each name includes the "@" sign.
 
 ```ruby
 class C
@@ -510,17 +517,17 @@ Extensions to `Module`
 
 Using plain Ruby you can wrap methods with other methods, that's called _alias chaining_.
 
-For example, let's say you'd like params to be strings in functional tests, as they are in real requests, but still want the convenience of assigning integers and other kind of values. To accomplish that you could wrap `ActionController::TestCase#process` this way in `test/test_helper.rb`:
+For example, let's say you'd like params to be strings in functional tests, as they are in real requests, but still want the convenience of assigning integers and other kind of values. To accomplish that you could wrap `ActionDispatch::IntegrationTest#process` this way in `test/test_helper.rb`:
 
 ```ruby
-ActionController::TestCase.class_eval do
+ActionDispatch::IntegrationTest.class_eval do
   # save a reference to the original process method
   alias_method :original_process, :process
 
   # now redefine process and delegate to original_process
-  def process(action, params=nil, session=nil, flash=nil, http_method='GET')
+  def process('GET', path, params: nil, headers: nil, env: nil, xhr: false)
     params = Hash[*params.map {|k, v| [k, v.to_s]}.flatten]
-    original_process(action, params, session, flash, http_method)
+    original_process('GET', path, params: params)
   end
 end
 ```
@@ -530,10 +537,10 @@ That's the method `get`, `post`, etc., delegate the work to.
 That technique has a risk, it could be the case that `:original_process` was taken. To try to avoid collisions people choose some label that characterizes what the chaining is about:
 
 ```ruby
-ActionController::TestCase.class_eval do
+ActionDispatch::IntegrationTest.class_eval do
   def process_with_stringified_params(...)
     params = Hash[*params.map {|k, v| [k, v.to_s]}.flatten]
-    process_without_stringified_params(action, params, session, flash, http_method)
+    process_without_stringified_params(method, path, params: params)
   end
   alias_method :process_without_stringified_params, :process
   alias_method :process, :process_with_stringified_params
@@ -543,10 +550,10 @@ end
 The method `alias_method_chain` provides a shortcut for that pattern:
 
 ```ruby
-ActionController::TestCase.class_eval do
+ActionDispatch::IntegrationTest.class_eval do
   def process_with_stringified_params(...)
     params = Hash[*params.map {|k, v| [k, v.to_s]}.flatten]
-    process_without_stringified_params(action, params, session, flash, http_method)
+    process_without_stringified_params(method, path, params: params)
   end
   alias_method_chain :process, :stringified_params
 end
@@ -561,7 +568,7 @@ NOTE: Defined in `active_support/core_ext/module/aliasing.rb`.
 Model attributes have a reader, a writer, and a predicate. You can alias a model attribute having the corresponding three methods defined for you in one shot. As in other aliasing methods, the new name is the first argument, and the old name is the second (one mnemonic is that they go in the same order as if you did an assignment):
 
 ```ruby
-class User < ActiveRecord::Base
+class User < ApplicationRecord
   # You can refer to the email column as "login".
   # This can be meaningful for authentication code.
   alias_attribute :login, :email
@@ -625,8 +632,6 @@ module ActiveSupport
     mattr_accessor :load_once_paths
     mattr_accessor :autoloaded_constants
     mattr_accessor :explicitly_unloadable_constants
-    mattr_accessor :logger
-    mattr_accessor :log_activity
     mattr_accessor :constant_watch_stack
     mattr_accessor :constant_watch_stack_mutex
   end
@@ -701,87 +706,6 @@ M.parents       # => [X::Y, X, Object]
 ```
 
 NOTE: Defined in `active_support/core_ext/module/introspection.rb`.
-
-### Constants
-
-The method `local_constants` returns the names of the constants that have been
-defined in the receiver module:
-
-```ruby
-module X
-  X1 = 1
-  X2 = 2
-  module Y
-    Y1 = :y1
-    X1 = :overrides_X1_above
-  end
-end
-
-X.local_constants    # => [:X1, :X2, :Y]
-X::Y.local_constants # => [:Y1, :X1]
-```
-
-The names are returned as symbols.
-
-NOTE: Defined in `active_support/core_ext/module/introspection.rb`.
-
-#### Qualified Constant Names
-
-The standard methods `const_defined?`, `const_get`, and `const_set` accept
-bare constant names. Active Support extends this API to be able to pass
-relative qualified constant names.
-
-The new methods are `qualified_const_defined?`, `qualified_const_get`, and
-`qualified_const_set`. Their arguments are assumed to be qualified constant
-names relative to their receiver:
-
-```ruby
-Object.qualified_const_defined?("Math::PI")       # => true
-Object.qualified_const_get("Math::PI")            # => 3.141592653589793
-Object.qualified_const_set("Math::Phi", 1.618034) # => 1.618034
-```
-
-Arguments may be bare constant names:
-
-```ruby
-Math.qualified_const_get("E") # => 2.718281828459045
-```
-
-These methods are analogous to their built-in counterparts. In particular,
-`qualified_constant_defined?` accepts an optional second argument to be
-able to say whether you want the predicate to look in the ancestors.
-This flag is taken into account for each constant in the expression while
-walking down the path.
-
-For example, given
-
-```ruby
-module M
-  X = 1
-end
-
-module N
-  class C
-    include M
-  end
-end
-```
-
-`qualified_const_defined?` behaves this way:
-
-```ruby
-N.qualified_const_defined?("C::X", false) # => false
-N.qualified_const_defined?("C::X", true)  # => true
-N.qualified_const_defined?("C::X")        # => true
-```
-
-As the last example implies, the second argument defaults to true,
-as in `const_defined?`.
-
-For coherence with the built-in methods only relative paths are accepted.
-Absolute qualified constant names like `::Math::PI` raise `NameError`.
-
-NOTE: Defined in `active_support/core_ext/module/qualified_const.rb`.
 
 ### Reachable
 
@@ -869,7 +793,7 @@ The macro `delegate` offers an easy way to forward methods.
 Let's imagine that users in some application have login information in the `User` model but name and other data in a separate `Profile` model:
 
 ```ruby
-class User < ActiveRecord::Base
+class User < ApplicationRecord
   has_one :profile
 end
 ```
@@ -877,7 +801,7 @@ end
 With that configuration you get a user's name via their profile, `user.profile.name`, but it could be handy to still be able to access such attribute directly:
 
 ```ruby
-class User < ActiveRecord::Base
+class User < ApplicationRecord
   has_one :profile
 
   def name
@@ -889,7 +813,7 @@ end
 That is what `delegate` does for you:
 
 ```ruby
-class User < ActiveRecord::Base
+class User < ApplicationRecord
   has_one :profile
 
   delegate :name, to: :profile
@@ -1030,7 +954,8 @@ class A
   class_attribute :x, instance_reader: false
 end
 
-A.new.x = 1 # NoMethodError
+A.new.x = 1
+A.new.x # NoMethodError
 ```
 
 For convenience `class_attribute` also defines an instance predicate which is the double negation of what the instance reader returns. In the examples above it would be called `x?`.
@@ -1679,19 +1604,6 @@ Given a string with a qualified constant reference expression, `deconstantize` r
 "Admin::Hotel::ReservationUtils".deconstantize # => "Admin::Hotel"
 ```
 
-Active Support for example uses this method in `Module#qualified_const_set`:
-
-```ruby
-def qualified_const_set(path, value)
-  QualifiedConstUtils.raise_if_absolute(path)
-
-  const_name = path.demodulize
-  mod_name = path.deconstantize
-  mod = mod_name.empty? ? self : qualified_const_get(mod_name)
-  mod.const_set(const_name, value)
-end
-```
-
 NOTE: Defined in `active_support/core_ext/string/inflections.rb`.
 
 #### `parameterize`
@@ -1760,7 +1672,7 @@ NOTE: Defined in `active_support/core_ext/string/inflections.rb`.
 The method `constantize` resolves the constant reference expression in its receiver:
 
 ```ruby
-"Fixnum".constantize # => Fixnum
+"Integer".constantize # => Integer
 
 module M
   X = 1
@@ -2017,12 +1929,14 @@ Produce a string representation of a number rounded to a precision:
 Produce a string representation of a number as a human-readable number of bytes:
 
 ```ruby
-123.to_s(:human_size)            # => 123 Bytes
-1234.to_s(:human_size)           # => 1.21 KB
-12345.to_s(:human_size)          # => 12.1 KB
-1234567.to_s(:human_size)        # => 1.18 MB
-1234567890.to_s(:human_size)     # => 1.15 GB
-1234567890123.to_s(:human_size)  # => 1.12 TB
+123.to_s(:human_size)                  # => 123 Bytes
+1234.to_s(:human_size)                 # => 1.21 KB
+12345.to_s(:human_size)                # => 12.1 KB
+1234567.to_s(:human_size)              # => 1.18 MB
+1234567890.to_s(:human_size)           # => 1.15 GB
+1234567890123.to_s(:human_size)        # => 1.12 TB
+1234567890123456.to_s(:human_size)     # => 1.1 PB
+1234567890123456789.to_s(:human_size)  # => 1.07 EB
 ```
 
 Produce a string representation of a number in human-readable words:
@@ -2087,30 +2001,22 @@ Extensions to `BigDecimal`
 --------------------------
 ### `to_s`
 
-The method `to_s` is aliased to `to_formatted_s`. This provides a convenient way to display a BigDecimal value in floating-point notation:
+The method `to_s` provides a default specifier of "F". This means that a simple call to `to_s` will result in floating point representation instead of engineering notation:
 
 ```ruby
 BigDecimal.new(5.00, 6).to_s  # => "5.0"
 ```
 
-### `to_formatted_s`
-
-Te method `to_formatted_s` provides a default specifier of "F".  This means that a simple call to `to_formatted_s` or `to_s` will result in floating point representation instead of engineering notation:
-
-```ruby
-BigDecimal.new(5.00, 6).to_formatted_s  # => "5.0"
-```
-
 and that symbol specifiers are also supported:
 
 ```ruby
-BigDecimal.new(5.00, 6).to_formatted_s(:db)  # => "5.0"
+BigDecimal.new(5.00, 6).to_s(:db)  # => "5.0"
 ```
 
 Engineering notation is still supported:
 
 ```ruby
-BigDecimal.new(5.00, 6).to_formatted_s("e")  # => "0.5E1"
+BigDecimal.new(5.00, 6).to_s("e")  # => "0.5E1"
 ```
 
 Extensions to `Enumerable`
@@ -2239,7 +2145,7 @@ Similarly, `from` returns the tail from the element at the passed index to the e
 [].from(0)           # => []
 ```
 
-The methods `second`, `third`, `fourth`, and `fifth` return the corresponding element (`first` is built-in). Thanks to social wisdom and positive constructiveness all around, `forty_two` is also available.
+The methods `second`, `third`, `fourth`, and `fifth` return the corresponding element, as do `second_to_last` and `third_to_last` (`first` and `last` are built-in). Thanks to social wisdom and positive constructiveness all around, `forty_two` is also available.
 
 ```ruby
 %w(a b c d).third # => "c"
@@ -2373,7 +2279,7 @@ Contributor.limit(2).order(:rank).to_xml
 
 To do so it sends `to_xml` to every item in turn, and collects the results under a root node. All items must respond to `to_xml`, an exception is raised otherwise.
 
-By default, the name of the root element is the underscorized and dasherized plural of the name of the class of the first item, provided the rest of elements belong to that type (checked with `is_a?`) and they are not hashes. In the example above that's "contributors".
+By default, the name of the root element is the underscored and dasherized plural of the name of the class of the first item, provided the rest of elements belong to that type (checked with `is_a?`) and they are not hashes. In the example above that's "contributors".
 
 If there's any element that does not belong to the type of the first one the root node becomes "objects":
 
@@ -2635,8 +2541,7 @@ To do so, the method loops over the pairs and builds nodes that depend on the _v
 ```ruby
 XML_TYPE_NAMES = {
   "Symbol"     => "symbol",
-  "Fixnum"     => "integer",
-  "Bignum"     => "integer",
+  "Integer"    => "integer",
   "BigDecimal" => "decimal",
   "Float"      => "float",
   "TrueClass"  => "boolean",
@@ -3011,6 +2916,24 @@ end
 
 NOTE: Defined in `active_support/core_ext/regexp.rb`.
 
+### `match?`
+
+Rails implements `Regexp#match?` for Ruby versions prior to 2.4:
+
+```ruby
+/oo/.match?('foo')    # => true
+/oo/.match?('bar')    # => false
+/oo/.match?('foo', 1) # => true
+```
+
+The backport has the same interface and lack of side-effects in the caller like
+not setting `$1` and friends, but it does not have the speed benefits. Its
+purpose is to be able to write 2.4 compatible code. Rails itself uses this
+predicate internally for example.
+
+Active Support defines `Regexp#match?` only if not present, so code running
+under 2.4 or later does run the original one and gets the performance boost.
+
 Extensions to `Range`
 ---------------------
 
@@ -3077,7 +3000,7 @@ INFO: The following calculation methods have edge cases in October 1582, since d
 
 #### `Date.current`
 
-Active Support defines `Date.current` to be today in the current time zone. That's like `Date.today`, except that it honors the user time zone, if defined. It also defines `Date.yesterday` and `Date.tomorrow`, and the instance predicates `past?`, `today?`, and `future?`, all of them relative to `Date.current`.
+Active Support defines `Date.current` to be today in the current time zone. That's like `Date.today`, except that it honors the user time zone, if defined. It also defines `Date.yesterday` and `Date.tomorrow`, and the instance predicates `past?`, `today?`, `future?`, `on_weekday?` and `on_weekend?`, all of them relative to `Date.current`.
 
 When making Date comparisons using methods which honor the user time zone, make sure to use `Date.current` and not `Date.today`. There are cases where the user time zone might be in the future compared to the system time zone, which `Date.today` uses by default. This means `Date.today` may equal `Date.yesterday`.
 
@@ -3466,6 +3389,8 @@ years_ago
 years_since
 prev_year (last_year)
 next_year
+on_weekday?
+on_weekend?
 ```
 
 The following methods are reimplemented so you do **not** need to load `active_support/core_ext/date/calculations.rb` for these ones:
@@ -3652,6 +3577,8 @@ years_ago
 years_since
 prev_year (last_year)
 next_year
+on_weekday?
+on_weekend?
 ```
 
 They are analogous. Please refer to their documentation above and take into account the following differences:

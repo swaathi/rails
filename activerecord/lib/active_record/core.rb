@@ -72,6 +72,34 @@ module ActiveRecord
 
       ##
       # :singleton-method:
+      # Specifies if an error should be raised if the query has an order being
+      # ignored when doing batch queries. Useful in applications where the
+      # scope being ignored is error-worthy, rather than a warning.
+      mattr_accessor :error_on_ignored_order, instance_writer: false
+      self.error_on_ignored_order = false
+
+      def self.error_on_ignored_order_or_limit
+        ActiveSupport::Deprecation.warn(<<-MSG.squish)
+          The flag error_on_ignored_order_or_limit is deprecated. Limits are
+          now supported. Please use error_on_ignored_order instead.
+        MSG
+        self.error_on_ignored_order
+      end
+
+      def error_on_ignored_order_or_limit
+        self.class.error_on_ignored_order_or_limit
+      end
+
+      def self.error_on_ignored_order_or_limit=(value)
+        ActiveSupport::Deprecation.warn(<<-MSG.squish)
+          The flag error_on_ignored_order_or_limit is deprecated. Limits are
+          now supported. Please use error_on_ignored_order= instead.
+        MSG
+        self.error_on_ignored_order = value
+      end
+
+      ##
+      # :singleton-method:
       # Specify whether or not to use timestamps for migration versions
       mattr_accessor :timestamped_migrations, instance_writer: false
       self.timestamped_migrations = true
@@ -128,7 +156,7 @@ module ActiveRecord
       end
 
       def initialize_find_by_cache # :nodoc:
-        @find_by_statement_cache = {}.extend(Mutex_m)
+        @find_by_statement_cache = { true => {}.extend(Mutex_m), false => {}.extend(Mutex_m) }
       end
 
       def inherited(child_class) # :nodoc:
@@ -151,7 +179,7 @@ module ActiveRecord
           id = id.id
           ActiveSupport::Deprecation.warn(<<-MSG.squish)
             You are passing an instance of ActiveRecord::Base to `find`.
-            Please pass the id of the object by calling `.id`
+            Please pass the id of the object by calling `.id`.
           MSG
         end
 
@@ -177,7 +205,7 @@ module ActiveRecord
         hash = args.first
 
         return super if hash.values.any? { |v|
-          v.nil? || Array === v || Hash === v
+          v.nil? || Array === v || Hash === v || Relation === v
         }
 
         # We can't cache Post.find_by(author: david) ...yet
@@ -193,8 +221,8 @@ module ActiveRecord
         }
         begin
           statement.execute(hash.values, self, connection).first
-        rescue TypeError => e
-          raise ActiveRecord::StatementInvalid.new(e.message, e)
+        rescue TypeError
+          raise ActiveRecord::StatementInvalid
         rescue RangeError
           nil
         end
@@ -249,11 +277,16 @@ module ActiveRecord
       # Returns the Arel engine.
       def arel_engine # :nodoc:
         @arel_engine ||=
-          if Base == self || connection_handler.retrieve_connection_pool(self)
+          if Base == self || connection_handler.retrieve_connection_pool(connection_specification_name)
             self
           else
             superclass.arel_engine
           end
+      end
+
+      def arel_attribute(name, table = arel_table) # :nodoc:
+        name = attribute_alias(name) if attribute_alias?(name)
+        table[name]
       end
 
       def predicate_builder # :nodoc:
@@ -267,15 +300,16 @@ module ActiveRecord
       private
 
       def cached_find_by_statement(key, &block) # :nodoc:
-        @find_by_statement_cache[key] || @find_by_statement_cache.synchronize {
-          @find_by_statement_cache[key] ||= StatementCache.create(connection, &block)
+        cache = @find_by_statement_cache[connection.prepared_statements]
+        cache[key] || cache.synchronize {
+          cache[key] ||= StatementCache.create(connection, &block)
         }
       end
 
       def relation # :nodoc:
         relation = Relation.create(self, arel_table, predicate_builder)
 
-        if finder_needs_type_condition?
+        if finder_needs_type_condition? && !ignore_default_scope?
           relation.where(type_condition).create_with(inheritance_column.to_sym => sti_name)
         else
           relation
@@ -324,7 +358,7 @@ module ActiveRecord
     #   post.title # => 'hello world'
     def init_with(coder)
       coder = LegacyYamlAdapter.convert(self.class, coder)
-      @attributes = coder['attributes']
+      @attributes = self.class.yaml_encoder.decode(coder)
 
       init_internals
 
@@ -390,11 +424,9 @@ module ActiveRecord
     #   Post.new.encode_with(coder)
     #   coder # => {"attributes" => {"id" => nil, ... }}
     def encode_with(coder)
-      # FIXME: Remove this when we better serialize attributes
-      coder['raw_attributes'] = attributes_before_type_cast
-      coder['attributes'] = @attributes
+      self.class.yaml_encoder.encode(@attributes, coder)
       coder['new_record'] = new_record?
-      coder['active_record_yaml_version'] = 1
+      coder['active_record_yaml_version'] = 2
     end
 
     # Returns true if +comparison_object+ is the same exact object, or +comparison_object+
@@ -418,7 +450,7 @@ module ActiveRecord
     #   [ Person.find(1), Person.find(2), Person.find(3) ] & [ Person.find(1), Person.find(4) ] # => [ Person.find(1) ]
     def hash
       if id
-        id.hash
+        [self.class, id].hash
       else
         super
       end

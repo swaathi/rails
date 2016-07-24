@@ -32,7 +32,7 @@ module ActiveRecord
           @alias_cache[node][column]
         end
 
-        class Table < Struct.new(:node, :columns)
+        class Table < Struct.new(:node, :columns) # :nodoc:
           def table
             Arel::Nodes::TableAlias.new node.table, node.aliased_table_name
           end
@@ -92,8 +92,9 @@ module ActiveRecord
       #    associations # => [:appointments]
       #    joins # =>  []
       #
-      def initialize(base, associations, joins)
+      def initialize(base, associations, joins, eager_loading: true)
         @alias_tracker = AliasTracker.create_with_joins(base.connection, base.table_name, joins, base.type_caster)
+        @eager_loading = eager_loading
         tree = self.class.make_tree associations
         @join_root = JoinBase.new base, build(tree, base)
         @join_root.children.each { |child| construct_tables! @join_root, child }
@@ -103,9 +104,14 @@ module ActiveRecord
         join_root.drop(1).map!(&:reflection)
       end
 
-      def join_constraints(outer_joins)
+      def join_constraints(outer_joins, join_type)
         joins = join_root.children.flat_map { |child|
-          make_inner_joins join_root, child
+
+          if join_type == Arel::Nodes::OuterJoin
+            make_left_outer_joins join_root, child
+          else
+            make_inner_joins join_root, child
+          end
         }
 
         joins.concat outer_joins.flat_map { |oj|
@@ -131,9 +137,9 @@ module ActiveRecord
       def instantiate(result_set, aliases)
         primary_key = aliases.column_alias(join_root, join_root.primary_key)
 
-        seen = Hash.new { |h,parent_klass|
-          h[parent_klass] = Hash.new { |i,parent_id|
-            i[parent_id] = Hash.new { |j,child_klass| j[child_klass] = {} }
+        seen = Hash.new { |i, object_id|
+          i[object_id] = Hash.new { |j, child_class|
+            j[child_class] = {}
           }
         }
 
@@ -150,7 +156,8 @@ module ActiveRecord
 
         message_bus.instrument('instantiation.active_record', payload) do
           result_set.each { |row_hash|
-            parent = parents[row_hash[primary_key]] ||= join_root.instantiate(row_hash, column_aliases)
+            parent_key = primary_key ? row_hash[primary_key] : row_hash
+            parent = parents[parent_key] ||= join_root.instantiate(row_hash, column_aliases)
             construct(parent, join_root, row_hash, result_set, seen, model_cache, aliases)
           }
         end
@@ -173,6 +180,14 @@ module ActiveRecord
         info      = make_constraints parent, child, tables, join_type
 
         [info] + child.children.flat_map { |c| make_outer_joins(child, c) }
+      end
+
+      def make_left_outer_joins(parent, child)
+        tables    = child.tables
+        join_type = Arel::Nodes::OuterJoin
+        info      = make_constraints parent, child, tables, join_type
+
+        [info] + child.children.flat_map { |c| make_left_outer_joins(child, c) }
       end
 
       def make_inner_joins(parent, child)
@@ -214,7 +229,7 @@ module ActiveRecord
 
       def find_reflection(klass, name)
         klass._reflect_on_association(name) or
-          raise ConfigurationError, "Association named '#{ name }' was not found on #{ klass.name }; perhaps you misspelled it?"
+          raise ConfigurationError, "Can't join '#{ klass.name }' to association named '#{ name }'; perhaps you misspelled it?"
       end
 
       def build(associations, base_klass)
@@ -224,16 +239,16 @@ module ActiveRecord
           reflection.check_eager_loadable!
 
           if reflection.polymorphic?
+            next unless @eager_loading
             raise EagerLoadPolymorphicError.new(reflection)
           end
 
           JoinAssociation.new reflection, build(right, reflection.klass)
-        end
+        end.compact
       end
 
       def construct(ar_parent, parent, row, rs, seen, model_cache, aliases)
         return if ar_parent.nil?
-        primary_id  = ar_parent.id
 
         parent.children.each do |node|
           if node.reflection.collection?
@@ -253,14 +268,14 @@ module ActiveRecord
             next
           end
 
-          model = seen[parent.base_klass][primary_id][node.base_klass][id]
+          model = seen[ar_parent.object_id][node.base_klass][id]
 
           if model
             construct(model, node, row, rs, seen, model_cache, aliases)
           else
             model = construct_model(ar_parent, node, row, model_cache, id, aliases)
             model.readonly!
-            seen[parent.base_klass][primary_id][node.base_klass][id] = model
+            seen[ar_parent.object_id][node.base_klass][id] = model
             construct(model, node, row, rs, seen, model_cache, aliases)
           end
         end

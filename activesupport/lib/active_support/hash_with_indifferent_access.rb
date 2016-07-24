@@ -59,13 +59,19 @@ module ActiveSupport
       if constructor.respond_to?(:to_hash)
         super()
         update(constructor)
+
+        hash = constructor.to_hash
+        self.default = hash.default if hash.default
+        self.default_proc = hash.default_proc if hash.default_proc
       else
         super(constructor)
       end
     end
 
-    def default(key = nil)
-      if key.is_a?(Symbol) && include?(key = key.to_s)
+    def default(*args)
+      arg_key = args.first
+
+      if include?(key = convert_key(arg_key))
         self[key]
       else
         super
@@ -73,11 +79,12 @@ module ActiveSupport
     end
 
     def self.new_from_hash_copying_default(hash)
-      hash = hash.to_hash
-      new(hash).tap do |new_hash|
-        new_hash.default = hash.default
-        new_hash.default_proc = hash.default_proc if hash.default_proc
-      end
+      ActiveSupport::Deprecation.warn(<<-MSG.squish)
+        `ActiveSupport::HashWithIndifferentAccess.new_from_hash_copying_default`
+        has been deprecated, and will be removed in Rails 5.1. The behavior of
+        this method is now identical to the behavior of `.new`.
+      MSG
+      new(hash)
     end
 
     def self.[](*args)
@@ -154,6 +161,20 @@ module ActiveSupport
     alias_method :has_key?, :key?
     alias_method :member?, :key?
 
+
+    # Same as <tt>Hash#[]</tt> where the key passed as argument can be
+    # either a string or a symbol:
+    #
+    #   counters = ActiveSupport::HashWithIndifferentAccess.new
+    #   counters[:foo] = 1
+    #
+    #   counters['foo'] # => 1
+    #   counters[:foo]  # => 1
+    #   counters[:zoo]  # => nil
+    def [](key)
+      super(convert_key(key))
+    end
+
     # Same as <tt>Hash#fetch</tt> where the key passed as argument can be
     # either a string or a symbol:
     #
@@ -206,7 +227,7 @@ module ActiveSupport
     #   hash['a'] = nil
     #   hash.reverse_merge(a: 0, b: 1) # => {"a"=>nil, "b"=>1}
     def reverse_merge(other_hash)
-      super(self.class.new_from_hash_copying_default(other_hash))
+      super(self.class.new(other_hash))
     end
 
     # Same semantics as +reverse_merge+ but modifies the receiver in-place.
@@ -219,7 +240,7 @@ module ActiveSupport
     #   h = { "a" => 100, "b" => 200 }
     #   h.replace({ "c" => 300, "d" => 400 }) # => {"c"=>300, "d"=>400}
     def replace(other_hash)
-      super(self.class.new_from_hash_copying_default(other_hash))
+      super(self.class.new(other_hash))
     end
 
     # Removes the specified key from the hash.

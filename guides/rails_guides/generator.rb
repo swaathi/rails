@@ -28,12 +28,12 @@
 #     enough:
 #
 #       # generates only association_basics.html
-#       ONLY=assoc ruby rails_guides.rb
+#       ONLY=assoc rake guides:generate
 #
 #     Separate many using commas:
 #
-#       # generates only association_basics.html and migrations.html
-#       ONLY=assoc,migrations ruby rails_guides.rb
+#       # generates only association_basics.html and command_line.html
+#       ONLY=assoc,command rake guides:generate
 #
 #     Note that if you are working on a guide generation will by default process
 #     only that one, so ONLY is rarely used nowadays.
@@ -162,7 +162,7 @@ module RailsGuides
     def select_only(guides)
       prefixes = ENV['ONLY'].split(",").map(&:strip)
       guides.select do |guide|
-        prefixes.any? { |p| guide.start_with?(p) || guide.start_with?("kindle") }
+        guide.start_with?('kindle'.freeze, *prefixes)
       end
     end
 

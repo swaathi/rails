@@ -2,6 +2,7 @@ require 'active_support/json'
 require 'active_support/core_ext/string/access'
 require 'active_support/core_ext/string/behavior'
 require 'active_support/core_ext/module/delegation'
+require 'active_support/core_ext/regexp'
 
 module ActiveSupport #:nodoc:
   module Multibyte #:nodoc:
@@ -56,7 +57,7 @@ module ActiveSupport #:nodoc:
       # Forward all undefined methods to the wrapped string.
       def method_missing(method, *args, &block)
         result = @wrapped_string.__send__(method, *args, &block)
-        if method.to_s =~ /!$/
+        if /!$/.match?(method)
           self if result
         else
           result.kind_of?(String) ? chars(result) : result
@@ -86,7 +87,8 @@ module ActiveSupport #:nodoc:
       end
 
       # Works like <tt>String#slice!</tt>, but returns an instance of
-      # Chars, or nil if the string was not modified.
+      # Chars, or nil if the string was not modified. The string will not be
+      # modified if the range given is out of bounds
       #
       #   string = 'Welcome'
       #   string.mb_chars.slice!(3)    # => #<ActiveSupport::Multibyte::Chars:0x000000038109b8 @wrapped_string="c">
@@ -94,7 +96,10 @@ module ActiveSupport #:nodoc:
       #   string.mb_chars.slice!(0..3) # => #<ActiveSupport::Multibyte::Chars:0x00000002eb80a0 @wrapped_string="Welo">
       #   string # => 'me'
       def slice!(*args)
-        chars(@wrapped_string.slice!(*args))
+        string_sliced = @wrapped_string.slice!(*args)
+        if string_sliced
+          chars(string_sliced)
+        end
       end
 
       # Reverses all characters in the string.

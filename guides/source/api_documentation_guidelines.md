@@ -84,10 +84,11 @@ English
 
 Please use American English (*color*, *center*, *modularize*, etc). See [a list of American and British English spelling differences here](http://en.wikipedia.org/wiki/American_and_British_English_spelling_differences).
 
-Comma
--------
+Oxford Comma
+------------
 
-Please use the Oxford comma (*red, white, and blue* style). See [the detail of Oxford comma](http://en.wikipedia.org/wiki/Serial_comma).
+Please use the [Oxford comma](http://en.wikipedia.org/wiki/Serial_comma)
+("red, white, and blue", instead of "red, white and blue").
 
 Example Code
 ------------
@@ -119,7 +120,7 @@ On the other hand, big chunks of structured documentation may have a separate "E
 The results of expressions follow them and are introduced by "# => ", vertically aligned:
 
 ```ruby
-# For checking if a fixnum is even or odd.
+# For checking if an integer is even or odd.
 #
 #   1.even? # => false
 #   1.odd?  # => true

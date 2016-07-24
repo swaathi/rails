@@ -15,7 +15,9 @@ class UriReservedCharactersRoutingTest < ActiveSupport::TestCase
   def setup
     @set = ActionDispatch::Routing::RouteSet.new
     @set.draw do
-      get ':controller/:action/:variable/*additional'
+      ActiveSupport::Deprecation.silence do
+        get ':controller/:action/:variable/*additional'
+      end
     end
 
     safe, unsafe = %w(: @ & = + $ , ;), %w(^ ? # [ ])
@@ -289,12 +291,6 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
     assert_equal({:id=>"1", :filters=>"foo", :format=>"js"}, params)
   end
 
-  def test_draw_with_block_arity_one_raises
-    assert_raise(RuntimeError) do
-      rs.draw { |map| map.match '/:controller(/:action(/:id))' }
-    end
-  end
-
   def test_specific_controller_action_failure
     rs.draw do
       mount lambda {} => "/foo"
@@ -306,7 +302,7 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
   end
 
   def test_default_setup
-    rs.draw { get '/:controller(/:action(/:id))' }
+    rs.draw { ActiveSupport::Deprecation.silence { get '/:controller(/:action(/:id))' } }
     assert_equal({:controller => "content", :action => 'index'}, rs.recognize_path("/content"))
     assert_equal({:controller => "content", :action => 'list'},  rs.recognize_path("/content/list"))
     assert_equal({:controller => "content", :action => 'show', :id => '10'}, rs.recognize_path("/content/show/10"))
@@ -329,7 +325,10 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
 
   def test_route_with_colon_first
     rs.draw do
-      get '/:controller/:action/:id', action: 'index', id: nil
+      ActiveSupport::Deprecation.silence do
+        get '/:controller/:action/:id', action: 'index', id: nil
+      end
+
       get ':url', controller: 'content', action: 'translate'
     end
 
@@ -337,7 +336,7 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
   end
 
   def test_route_with_regexp_for_action
-    rs.draw { get '/:controller/:action', action: /auth[-|_].+/ }
+    rs.draw { ActiveSupport::Deprecation.silence { get '/:controller/:action', action: /auth[-|_].+/ } }
 
     assert_equal({ action: 'auth_google', controller: 'content' }, rs.recognize_path('/content/auth_google'))
     assert_equal({ action: 'auth-facebook', controller: 'content' }, rs.recognize_path('/content/auth-facebook'))
@@ -348,8 +347,10 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
 
   def test_route_with_regexp_for_controller
     rs.draw do
-      get ':controller/:admintoken(/:action(/:id))', :controller => /admin\/.+/
-      get '/:controller(/:action(/:id))'
+      ActiveSupport::Deprecation.silence do
+        get ':controller/:admintoken(/:action(/:id))', :controller => /admin\/.+/
+        get '/:controller(/:action(/:id))'
+      end
     end
 
     assert_equal({:controller => "admin/user", :admintoken => "foo", :action => "index"},
@@ -363,7 +364,9 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
 
   def test_route_with_regexp_and_captures_for_controller
     rs.draw do
-      get '/:controller(/:action(/:id))', :controller => /admin\/(accounts|users)/
+      ActiveSupport::Deprecation.silence do
+        get '/:controller(/:action(/:id))', :controller => /admin\/(accounts|users)/
+      end
     end
     assert_equal({:controller => "admin/accounts", :action => "index"}, rs.recognize_path("/admin/accounts"))
     assert_equal({:controller => "admin/users", :action => "index"}, rs.recognize_path("/admin/users"))
@@ -372,11 +375,13 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
 
   def test_route_with_regexp_and_dot
     rs.draw do
-      get ':controller/:action/:file',
-                :controller => /admin|user/,
-                :action => /upload|download/,
-                :defaults => {:file => nil},
-                :constraints => {:file => %r{[^/]+(\.[^/]+)?}}
+      ActiveSupport::Deprecation.silence do
+        get ':controller/:action/:file',
+                  :controller => /admin|user/,
+                  :action => /upload|download/,
+                  :defaults => {:file => nil},
+                  :constraints => {:file => %r{[^/]+(\.[^/]+)?}}
+      end
     end
     # Without a file extension
     assert_equal '/user/download/file',
@@ -463,7 +468,9 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
 
   def test_named_route_without_hash
     rs.draw do
-      get ':controller/:action/:id', :as => 'normal'
+      ActiveSupport::Deprecation.silence do
+        get ':controller/:action/:id', :as => 'normal'
+      end
     end
   end
 
@@ -515,7 +522,10 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
     rs.draw do
       get 'page/:year/:month/:day/:title' => 'page#show', :as => 'article',
         :year => /\d+/, :month => /\d+/, :day => /\d+/
-      get ':controller/:action/:id'
+
+      ActiveSupport::Deprecation.silence do
+        get ':controller/:action/:id'
+      end
     end
 
     routes = setup_for_named_route
@@ -525,7 +535,7 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
   end
 
   def test_changing_controller
-    rs.draw { get ':controller/:action/:id' }
+    rs.draw { ActiveSupport::Deprecation.silence { get ':controller/:action/:id' } }
 
     get URI('http://test.host/admin/user/index/10')
 
@@ -536,7 +546,10 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
   def test_paths_escaped
     rs.draw do
       get 'file/*path' => 'content#show_file', :as => 'path'
-      get ':controller/:action/:id'
+
+      ActiveSupport::Deprecation.silence do
+        get ':controller/:action/:id'
+      end
     end
 
     # No + to space in URI escaping, only for query params.
@@ -561,7 +574,9 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
 
   def test_non_controllers_cannot_be_matched
     rs.draw do
-      get ':controller/:action/:id'
+      ActiveSupport::Deprecation.silence do
+        get ':controller/:action/:id'
+      end
     end
     assert_raise(ActionController::RoutingError) { rs.recognize_path("/not_a/show/10") }
   end
@@ -599,8 +614,10 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
 
   def test_backwards
     rs.draw do
-      get 'page/:id(/:action)' => 'pages#show'
-      get ':controller(/:action(/:id))'
+      ActiveSupport::Deprecation.silence do
+        get 'page/:id(/:action)' => 'pages#show'
+        get ':controller(/:action(/:id))'
+      end
     end
 
     get URI('http://test.host/pages/show')
@@ -609,10 +626,13 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
     assert_equal '/pages/boo', url_for(rs, { :controller => 'pages', :action => 'boo' })
   end
 
-  def test_route_with_fixnum_default
+  def test_route_with_integer_default
     rs.draw do
       get 'page(/:id)' => 'content#show_page', :id => 1
-      get ':controller/:action/:id'
+
+      ActiveSupport::Deprecation.silence do
+        get ':controller/:action/:id'
+      end
     end
 
     assert_equal '/page',    url_for(rs, { :controller => 'content', :action => 'show_page' })
@@ -629,7 +649,10 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
   def test_route_with_text_default
     rs.draw do
       get 'page/:id' => 'content#show_page', :id => 1
-      get ':controller/:action/:id'
+
+      ActiveSupport::Deprecation.silence do
+        get ':controller/:action/:id'
+      end
     end
 
     assert_equal '/page/foo', url_for(rs, { :controller => 'content', :action => 'show_page', :id => 'foo' })
@@ -644,7 +667,7 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
   end
 
   def test_action_expiry
-    rs.draw { get ':controller(/:action(/:id))' }
+    rs.draw { ActiveSupport::Deprecation.silence { get ':controller(/:action(/:id))' } }
     get URI('http://test.host/content/show')
     assert_equal '/content', controller.url_for(:controller => 'content', :only_path => true)
   end
@@ -667,7 +690,10 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
         :defaults => { :year => nil },
         :constraints => { :year => /\d{4}/ }
       )
-      get ':controller/:action/:id'
+
+      ActiveSupport::Deprecation.silence do
+        get ':controller/:action/:id'
+      end
     end
 
     assert_equal '/test', url_for(rs, { :controller => 'post', :action => 'show' })
@@ -679,7 +705,10 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
   def test_set_to_nil_forgets
     rs.draw do
       get 'pages(/:year(/:month(/:day)))' => 'content#list_pages', :month => nil, :day => nil
-      get ':controller/:action/:id'
+
+      ActiveSupport::Deprecation.silence do
+        get ':controller/:action/:id'
+      end
     end
 
     assert_equal '/pages/2005',
@@ -726,7 +755,10 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
   def test_named_route_method
     rs.draw do
       get 'categories' => 'content#categories', :as => 'categories'
-      get ':controller(/:action(/:id))'
+
+      ActiveSupport::Deprecation.silence do
+        get ':controller(/:action(/:id))'
+      end
     end
 
     assert_equal '/categories', url_for(rs, { :controller => 'content', :action => 'categories' })
@@ -742,7 +774,10 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
     rs.draw do
       get 'journal' => 'content#list_journal',
         :date => nil, :user_id => nil
-      get ':controller/:action/:id'
+
+      ActiveSupport::Deprecation.silence do
+        get ':controller/:action/:id'
+      end
     end
 
     assert_equal '/journal', url_for(rs, {
@@ -782,10 +817,12 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
 
   def test_subpath_recognized
     rs.draw do
-      get '/books/:id/edit'    => 'subpath_books#edit'
-      get '/items/:id/:action' => 'subpath_books'
-      get '/posts/new/:action' => 'subpath_books'
-      get '/posts/:id'         => 'subpath_books#show'
+      ActiveSupport::Deprecation.silence do
+        get '/books/:id/edit'    => 'subpath_books#edit'
+        get '/items/:id/:action' => 'subpath_books'
+        get '/posts/new/:action' => 'subpath_books'
+        get '/posts/:id'         => 'subpath_books#show'
+      end
     end
 
     hash = rs.recognize_path "/books/17/edit"
@@ -807,9 +844,11 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
 
   def test_subpath_generated
     rs.draw do
-      get '/books/:id/edit'    => 'subpath_books#edit'
-      get '/items/:id/:action' => 'subpath_books'
-      get '/posts/new/:action' => 'subpath_books'
+      ActiveSupport::Deprecation.silence do
+        get '/books/:id/edit'    => 'subpath_books#edit'
+        get '/items/:id/:action' => 'subpath_books'
+        get '/posts/new/:action' => 'subpath_books'
+      end
     end
 
     assert_equal "/books/7/edit",      url_for(rs, { :controller => "subpath_books", :id => 7, :action => "edit" })
@@ -833,8 +872,11 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
       get 'ca' => 'ca#aa'
       get 'cb' => 'cb#ab'
       get 'cc' => 'cc#ac'
-      get ':controller/:action/:id'
-      get ':controller/:action/:id.:format'
+
+      ActiveSupport::Deprecation.silence do
+        get ':controller/:action/:id'
+        get ':controller/:action/:id.:format'
+      end
     end
 
     hash = rs.recognize_path "/cc"
@@ -845,8 +887,11 @@ class LegacyRouteSetTests < ActiveSupport::TestCase
     rs.draw do
       get 'cb' => 'cb#ab'
       get 'cc' => 'cc#ac'
-      get ':controller/:action/:id'
-      get ':controller/:action/:id.:format'
+
+      ActiveSupport::Deprecation.silence do
+        get ':controller/:action/:id'
+        get ':controller/:action/:id.:format'
+      end
     end
 
     hash = rs.recognize_path "/cc"
@@ -877,29 +922,34 @@ class RouteSetTest < ActiveSupport::TestCase
     @default_route_set ||= begin
       set = ActionDispatch::Routing::RouteSet.new
       set.draw do
-        get '/:controller(/:action(/:id))'
+
+        ActiveSupport::Deprecation.silence do
+          get '/:controller(/:action(/:id))'
+        end
       end
       set
     end
   end
 
   def test_generate_extras
-    set.draw { get ':controller/(:action(/:id))' }
+    set.draw { ActiveSupport::Deprecation.silence { get ':controller/(:action(/:id))' } }
     path, extras = set.generate_extras(:controller => "foo", :action => "bar", :id => 15, :this => "hello", :that => "world")
     assert_equal "/foo/bar/15", path
     assert_equal %w(that this), extras.map(&:to_s).sort
   end
 
   def test_extra_keys
-    set.draw { get ':controller/:action/:id' }
+    set.draw { ActiveSupport::Deprecation.silence { get ':controller/:action/:id' } }
     extras = set.extra_keys(:controller => "foo", :action => "bar", :id => 15, :this => "hello", :that => "world")
     assert_equal %w(that this), extras.map(&:to_s).sort
   end
 
   def test_generate_extras_not_first
     set.draw do
-      get ':controller/:action/:id.:format'
-      get ':controller/:action/:id'
+      ActiveSupport::Deprecation.silence do
+        get ':controller/:action/:id.:format'
+        get ':controller/:action/:id'
+      end
     end
     path, extras = set.generate_extras(:controller => "foo", :action => "bar", :id => 15, :this => "hello", :that => "world")
     assert_equal "/foo/bar/15", path
@@ -908,8 +958,10 @@ class RouteSetTest < ActiveSupport::TestCase
 
   def test_generate_not_first
     set.draw do
-      get ':controller/:action/:id.:format'
-      get ':controller/:action/:id'
+      ActiveSupport::Deprecation.silence do
+        get ':controller/:action/:id.:format'
+        get ':controller/:action/:id'
+      end
     end
     assert_equal "/foo/bar/15?this=hello",
         url_for(set, { :controller => "foo", :action => "bar", :id => 15, :this => "hello" })
@@ -917,8 +969,10 @@ class RouteSetTest < ActiveSupport::TestCase
 
   def test_extra_keys_not_first
     set.draw do
-      get ':controller/:action/:id.:format'
-      get ':controller/:action/:id'
+      ActiveSupport::Deprecation.silence do
+        get ':controller/:action/:id.:format'
+        get ':controller/:action/:id'
+      end
     end
     extras = set.extra_keys(:controller => "foo", :action => "bar", :id => 15, :this => "hello", :that => "world")
     assert_equal %w(that this), extras.map(&:to_s).sort
@@ -1050,7 +1104,9 @@ class RouteSetTest < ActiveSupport::TestCase
 
   def test_draw_default_route
     set.draw do
-      get '/:controller/:action/:id'
+      ActiveSupport::Deprecation.silence do
+        get ':controller/:action/:id'
+      end
     end
 
     assert_equal 1, set.routes.size
@@ -1065,7 +1121,10 @@ class RouteSetTest < ActiveSupport::TestCase
   def test_route_with_parameter_shell
     set.draw do
       get 'page/:id' => 'pages#show', :id => /\d+/
-      get '/:controller(/:action(/:id))'
+
+      ActiveSupport::Deprecation.silence do
+        get '/:controller(/:action(/:id))'
+      end
     end
 
     assert_equal({:controller => 'pages', :action => 'index'}, request_path_params('/pages'))
@@ -1320,7 +1379,9 @@ class RouteSetTest < ActiveSupport::TestCase
     @set = make_set false
 
     set.draw do
-      get ':controller/:id/:action'
+      ActiveSupport::Deprecation.silence do
+        get ':controller/:id/:action'
+      end
     end
 
     get URI('http://test.host/people/7/show')
@@ -1333,7 +1394,10 @@ class RouteSetTest < ActiveSupport::TestCase
 
     set.draw do
       get 'about' => "welcome#about"
-      get ':controller/:action/:id'
+
+      ActiveSupport::Deprecation.silence do
+        get ':controller/:id/:action'
+      end
     end
 
     get URI('http://test.host/welcom/get/7')
@@ -1344,7 +1408,7 @@ class RouteSetTest < ActiveSupport::TestCase
   end
 
   def test_generate
-    set.draw { get ':controller/:action/:id' }
+    set.draw { ActiveSupport::Deprecation.silence { get ':controller/:action/:id' } }
 
     args = { :controller => "foo", :action => "bar", :id => "7", :x => "y" }
     assert_equal "/foo/bar/7?x=y",     url_for(set, args)
@@ -1355,7 +1419,9 @@ class RouteSetTest < ActiveSupport::TestCase
   def test_generate_with_path_prefix
     set.draw do
       scope "my" do
-        get ':controller(/:action(/:id))'
+        ActiveSupport::Deprecation.silence do
+          get ':controller(/:action(/:id))'
+        end
       end
     end
 
@@ -1366,7 +1432,9 @@ class RouteSetTest < ActiveSupport::TestCase
   def test_generate_with_blank_path_prefix
     set.draw do
       scope "" do
-        get ':controller(/:action(/:id))'
+        ActiveSupport::Deprecation.silence do
+          get ':controller(/:action(/:id))'
+        end
       end
     end
 
@@ -1378,9 +1446,11 @@ class RouteSetTest < ActiveSupport::TestCase
     @set = make_set false
 
     set.draw do
-      get "/connection/manage(/:action)" => 'connection/manage#index'
-      get "/connection/connection" => "connection/connection#index"
-      get '/connection' => 'connection#index', :as => 'family_connection'
+      ActiveSupport::Deprecation.silence do
+        get "/connection/manage(/:action)" => 'connection/manage#index'
+        get "/connection/connection" => "connection/connection#index"
+        get '/connection' => 'connection#index', :as => 'family_connection'
+      end
     end
 
     assert_equal({ :controller => 'connection/manage',
@@ -1398,7 +1468,9 @@ class RouteSetTest < ActiveSupport::TestCase
     @set = make_set false
 
     set.draw do
-      get ':controller(/:action(/:id))'
+      ActiveSupport::Deprecation.silence do
+        get ':controller(/:action(/:id))'
+      end
     end
 
     get URI('http://test.host/books/show/10')
@@ -1413,7 +1485,10 @@ class RouteSetTest < ActiveSupport::TestCase
 
     set.draw do
       get 'show_weblog/:parameter' => 'weblog#show'
-      get ':controller(/:action(/:id))'
+
+      ActiveSupport::Deprecation.silence do
+        get ':controller(/:action(/:id))'
+      end
     end
 
     get URI('http://test.host/weblog/show/1')
@@ -1441,7 +1516,7 @@ class RouteSetTest < ActiveSupport::TestCase
   def test_expiry_determination_should_consider_values_with_to_param
     @set = make_set false
 
-    set.draw { get 'projects/:project_id/:controller/:action' }
+    set.draw { ActiveSupport::Deprecation.silence { get 'projects/:project_id/:controller/:action' } }
 
     get URI('http://test.host/projects/1/weblog/show')
 
@@ -1618,7 +1693,9 @@ class RouteSetTest < ActiveSupport::TestCase
 
   def test_assign_route_options_with_anchor_chars
     set.draw do
-      get '/cars/:action/:person/:car/', :controller => 'cars'
+      ActiveSupport::Deprecation.silence do
+        get '/cars/:action/:person/:car/', :controller => 'cars'
+      end
     end
 
     assert_equal '/cars/buy/1/2', url_for(set, { :controller => 'cars', :action => 'buy', :person => '1', :car => '2' })
@@ -1628,7 +1705,9 @@ class RouteSetTest < ActiveSupport::TestCase
 
   def test_segmentation_of_dot_path
     set.draw do
-      get '/books/:action.rss', :controller => 'books'
+      ActiveSupport::Deprecation.silence do
+        get '/books/:action.rss', :controller => 'books'
+      end
     end
 
     assert_equal '/books/list.rss', url_for(set, { :controller => 'books', :action => 'list' })
@@ -1638,7 +1717,9 @@ class RouteSetTest < ActiveSupport::TestCase
 
   def test_segmentation_of_dynamic_dot_path
     set.draw do
-      get '/books(/:action(.:format))', :controller => 'books'
+      ActiveSupport::Deprecation.silence do
+        get '/books(/:action(.:format))', :controller => 'books'
+      end
     end
 
     assert_equal '/books/list.rss', url_for(set, { :controller => 'books', :action => 'list', :format => 'rss' })
@@ -1653,7 +1734,7 @@ class RouteSetTest < ActiveSupport::TestCase
   end
 
   def test_slashes_are_implied
-    set.draw { get("/:controller(/:action(/:id))") }
+    set.draw { ActiveSupport::Deprecation.silence { get("/:controller(/:action(/:id))") } }
 
     assert_equal '/content',        url_for(set, { :controller => 'content', :action => 'index' })
     assert_equal '/content/list',   url_for(set, { :controller => 'content', :action => 'list' })
@@ -1744,7 +1825,9 @@ class RouteSetTest < ActiveSupport::TestCase
                              :constraints => { :page => /\d+/ },
                              :defaults => { :page => 1 }
 
-      get ':controller/:action/:id'
+      ActiveSupport::Deprecation.silence do
+        get ':controller/:action/:id'
+      end
     end
 
     assert_equal '/ibocorp', url_for(set, { :controller => 'ibocorp', :action => "show", :page => 1 })
@@ -1767,7 +1850,11 @@ class RouteSetTest < ActiveSupport::TestCase
             :day => nil, :month => nil
 
       get "blog/show/:id", :controller => "blog", :action => "show", :id => /\d+/
-      get "blog/:controller/:action(/:id)"
+
+      ActiveSupport::Deprecation.silence do
+        get "blog/:controller/:action(/:id)"
+      end
+
       get "*anything", :controller => "blog", :action => "unknown_request"
     end
 
@@ -1856,13 +1943,20 @@ class RackMountIntegrationTests < ActiveSupport::TestCase
 
     get 'news(.:format)' => "news#index"
 
-    get 'comment/:id(/:action)' => "comments#show"
-    get 'ws/:controller(/:action(/:id))', :ws => true
-    get 'account(/:action)' => "account#subscription"
-    get 'pages/:page_id/:controller(/:action(/:id))'
-    get ':controller/ping', :action => 'ping'
+    ActiveSupport::Deprecation.silence do
+      get 'comment/:id(/:action)' => "comments#show"
+      get 'ws/:controller(/:action(/:id))', :ws => true
+      get 'account(/:action)' => "account#subscription"
+      get 'pages/:page_id/:controller(/:action(/:id))'
+      get ':controller/ping', :action => 'ping'
+    end
+
     get 'こんにちは/世界', :controller => 'news', :action => 'index'
-    match ':controller(/:action(/:id))(.:format)', :via => :all
+
+    ActiveSupport::Deprecation.silence do
+      match ':controller(/:action(/:id))(.:format)', :via => :all
+    end
+
     root :to => "news#index"
   }
 
@@ -1970,11 +2064,11 @@ class RackMountIntegrationTests < ActiveSupport::TestCase
   def test_extras
     params = {:controller => 'people'}
     assert_equal [], @routes.extra_keys(params)
-    assert_equal({:controller => 'people'}, params)
+    assert_equal({:controller => 'people', :action => 'index'}, params)
 
     params = {:controller => 'people', :foo => 'bar'}
     assert_equal [:foo], @routes.extra_keys(params)
-    assert_equal({:controller => 'people', :foo => 'bar'}, params)
+    assert_equal({:controller => 'people', :action => 'index', :foo => 'bar'}, params)
 
     params = {:controller => 'people', :action => 'create', :person => { :name => 'Josh'}}
     assert_equal [:person], @routes.extra_keys(params)

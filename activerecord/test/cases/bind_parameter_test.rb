@@ -31,7 +31,8 @@ module ActiveRecord
       ActiveSupport::Notifications.unsubscribe(@subscription)
     end
 
-    if ActiveRecord::Base.connection.supports_statement_cache?
+    if ActiveRecord::Base.connection.supports_statement_cache? &&
+       ActiveRecord::Base.connection.prepared_statements
       def test_bind_from_join_in_subquery
         subquery = Author.joins(:thinking_posts).where(name: 'David')
         scope = Author.from(subquery, 'authors').where(id: 1)
@@ -39,7 +40,7 @@ module ActiveRecord
       end
 
       def test_binds_are_logged
-        sub   = @connection.substitute_at(@pk)
+        sub   = Arel::Nodes::BindParam.new
         binds = [Relation::QueryAttribute.new("id", 1, Type::Value.new)]
         sql   = "select * from topics where id = #{sub.to_sql}"
 
@@ -56,10 +57,13 @@ module ActiveRecord
       end
 
       def test_logs_bind_vars_after_type_cast
+        binds = [Relation::QueryAttribute.new("id", "10", Type::Integer.new)]
+        type_casted_binds = binds.map { |attr| type_cast(attr.value_for_database) }
         payload = {
           :name  => 'SQL',
           :sql   => 'select * from topics where id = ?',
-          :binds => [Relation::QueryAttribute.new("id", "10", Type::Integer.new)]
+          :binds => binds,
+          :type_casted_binds => type_casted_binds
         }
         event  = ActiveSupport::Notifications::Event.new(
           'foo',
@@ -82,6 +86,12 @@ module ActiveRecord
 
         logger.sql event
         assert_match([[@pk.name, 10]].inspect, logger.debugs.first)
+      end
+
+      private
+
+      def type_cast(value)
+        ActiveRecord::Base.connection.type_cast(value)
       end
     end
   end

@@ -25,6 +25,11 @@ class ToSentenceTest < ActiveSupport::TestCase
     assert_equal "one, two and three", ['one', 'two', 'three'].to_sentence(last_word_connector: ' and ')
   end
 
+  def test_to_sentence_with_fallback_string
+    assert_equal "none", [].to_sentence(fallback_string: 'none')
+    assert_equal "one, two, and three", ['one', 'two', 'three'].to_sentence(fallback_string: 'none')
+  end
+
   def test_two_elements
     assert_equal "one and two", ['one', 'two'].to_sentence
     assert_equal "one two", ['one', 'two'].to_sentence(two_words_connector: ' ')
@@ -58,7 +63,7 @@ class ToSentenceTest < ActiveSupport::TestCase
       ['one', 'two'].to_sentence(passing: 'invalid option')
     end
 
-    assert_equal exception.message, "Unknown key: :passing. Valid keys are: :words_connector, :two_words_connector, :last_word_connector, :locale"
+    assert_equal exception.message, "Unknown key: :passing. Valid keys are: :words_connector, :two_words_connector, :last_word_connector, :locale, :fallback_string"
   end
 
   def test_always_returns_string
@@ -101,10 +106,10 @@ class ToXmlTest < ActiveSupport::TestCase
   end
 
   def test_to_xml_with_non_hash_elements
-    xml = [1, 2, 3].to_xml(skip_instruct: true, indent: 0)
+    xml = %w[1 2 3].to_xml(skip_instruct: true, indent: 0)
 
-    assert_equal '<fixnums type="array"><fixnum', xml.first(29)
-    assert xml.include?(%(<fixnum type="integer">2</fixnum>)), xml
+    assert_equal '<strings type="array"><string', xml.first(29)
+    assert xml.include?(%(<string>2</string>)), xml
   end
 
   def test_to_xml_with_non_hash_different_type_elements

@@ -46,6 +46,13 @@ class NamedScopingTest < ActiveRecord::TestCase
     assert_equal Topic.average(:replies_count), Topic.base.average(:replies_count)
   end
 
+  def test_calling_merge_at_first_in_scope
+    Topic.class_eval do
+      scope :calling_merge_at_first_in_scope, Proc.new { merge(Topic.replied) }
+    end
+    assert_equal Topic.calling_merge_at_first_in_scope.to_a, Topic.replied.to_a
+  end
+
   def test_method_missing_priority_when_delegating
     klazz = Class.new(ActiveRecord::Base) do
       self.table_name = "topics"
@@ -301,7 +308,7 @@ class NamedScopingTest < ActiveRecord::TestCase
       :relation,      # private class method on AR::Base
       :new,           # redefined class method on AR::Base
       :all,           # a default scope
-      :public,        # some imporant methods on Module and Class
+      :public,        # some important methods on Module and Class
       :protected,
       :private,
       :name,
@@ -440,6 +447,25 @@ class NamedScopingTest < ActiveRecord::TestCase
     end
   end
 
+  def test_scopes_with_reserved_names
+    class << Topic
+      def public_method; end
+      public :public_method
+
+      def protected_method; end
+      protected :protected_method
+
+      def private_method; end
+      private :private_method
+    end
+
+    [:public_method, :protected_method, :private_method].each do |reserved_method|
+      assert Topic.respond_to?(reserved_method, true)
+      ActiveRecord::Base.logger.expects(:warn)
+      silence_warnings { Topic.scope(reserved_method, -> { }) }
+    end
+  end
+
   def test_scopes_on_relations
     # Topic.replied
     approved_topics = Topic.all.approved.order('id DESC')
@@ -523,6 +549,20 @@ class NamedScopingTest < ActiveRecord::TestCase
 
   def test_subclass_merges_scopes_properly
     assert_equal 1, SpecialComment.where(body: 'go crazy').created.count
+  end
+
+  def test_model_class_should_respond_to_none
+    assert !Topic.none?
+    Topic.delete_all
+    assert Topic.none?
+  end
+
+  def test_model_class_should_respond_to_one
+    assert !Topic.one?
+    Topic.delete_all
+    assert !Topic.one?
+    Topic.create!
+    assert Topic.one?
   end
 
 end

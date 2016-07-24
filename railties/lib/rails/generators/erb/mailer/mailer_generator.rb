@@ -11,7 +11,7 @@ module Erb # :nodoc:
 
         if self.behavior == :invoke
           formats.each do |format|
-            layout_path = File.join("app/views/layouts", filename_with_extensions("mailer", format))
+            layout_path = File.join('app/views/layouts', class_path, filename_with_extensions('mailer', format))
             template filename_with_extensions(:layout, format), layout_path
           end
         end
@@ -33,7 +33,7 @@ module Erb # :nodoc:
       end
 
       def file_name
-        @_file_name ||= super.gsub(/\_mailer/i, '')
+        @_file_name ||= super.gsub(/_mailer/i, '')
       end
     end
   end

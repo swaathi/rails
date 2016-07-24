@@ -36,8 +36,8 @@ module ActionDispatch
         HTTP_ACCEPT HTTP_ACCEPT_CHARSET HTTP_ACCEPT_ENCODING
         HTTP_ACCEPT_LANGUAGE HTTP_CACHE_CONTROL HTTP_FROM
         HTTP_NEGOTIATE HTTP_PRAGMA HTTP_CLIENT_IP
-        HTTP_X_FORWARDED_FOR HTTP_VERSION
-        HTTP_X_REQUEST_ID HTTP_X_FORWARDED_HOST
+        HTTP_X_FORWARDED_FOR HTTP_ORIGIN HTTP_VERSION
+        HTTP_X_CSRF_TOKEN HTTP_X_REQUEST_ID HTTP_X_FORWARDED_HOST
         SERVER_ADDR
         ].freeze
 
@@ -47,6 +47,10 @@ module ActionDispatch
           get_header "#{env}".freeze            #   get_header "HTTP_ACCEPT_CHARSET".freeze
         end                                     # end
       METHOD
+    end
+
+    def self.empty
+      new({})
     end
 
     def initialize(env)
@@ -59,15 +63,7 @@ module ActionDispatch
       @ip                = nil
     end
 
-    def check_path_parameters!
-      # If any of the path parameters has an invalid encoding then
-      # raise since it's likely to trigger errors further on.
-      path_parameters.each do |key, value|
-        next unless value.respond_to?(:valid_encoding?)
-        unless value.valid_encoding?
-          raise ActionController::BadRequest, "Invalid parameter: #{key} => #{value}"
-        end
-      end
+    def commit_cookie_jar! # :nodoc:
     end
 
     PASS_NOT_FOUND = Class.new { # :nodoc:
@@ -76,7 +72,6 @@ module ActionDispatch
     }
 
     def controller_class
-      check_path_parameters!
       params = path_parameters
 
       if params.key?(:controller)
@@ -252,7 +247,7 @@ module ActionDispatch
     end
 
     # Returns the IP address of client as a +String+,
-    # usually set by the RemoteIp middleware.
+    # usually set by the RemoteIp middleware.
     def remote_ip
       @remote_ip ||= (get_header("action_dispatch.remote_ip") || ip).to_s
     end
@@ -306,10 +301,16 @@ module ActionDispatch
       end
     end
 
-    # Returns true if the request's content MIME type is
-    # +application/x-www-form-urlencoded+ or +multipart/form-data+.
+    # Determine whether the request body contains form-data by checking
+    # the request Content-Type for one of the media-types:
+    # "application/x-www-form-urlencoded" or "multipart/form-data". The
+    # list of form-data media types can be modified through the
+    # +FORM_DATA_MEDIA_TYPES+ array.
+    #
+    # A request body is not assumed to contain form-data when no
+    # Content-Type header is provided and the request_method is POST.
     def form_data?
-      FORM_DATA_MEDIA_TYPES.include?(content_mime_type.to_s)
+      FORM_DATA_MEDIA_TYPES.include?(media_type)
     end
 
     def body_stream #:nodoc:
@@ -324,7 +325,6 @@ module ActionDispatch
       else
         self.session = {}
       end
-      self.flash = nil
     end
 
     def session=(session) #:nodoc:
@@ -338,10 +338,13 @@ module ActionDispatch
     # Override Rack's GET method to support indifferent access
     def GET
       fetch_header("action_dispatch.request.query_parameters") do |k|
-        set_header k, Request::Utils.normalize_encode_params(super || {})
+        rack_query_params = super || {}
+        # Check for non UTF-8 parameter values, which would cause errors later
+        Request::Utils.check_param_encoding(rack_query_params)
+        set_header k, Request::Utils.normalize_encode_params(rack_query_params)
       end
     rescue Rack::Utils::ParameterTypeError, Rack::Utils::InvalidParameterError => e
-      raise ActionController::BadRequest.new(:query, e)
+      raise ActionController::BadRequest.new("Invalid query parameters: #{e.message}")
     end
     alias :query_parameters :GET
 
@@ -357,7 +360,7 @@ module ActionDispatch
       self.request_parameters = Request::Utils.normalize_encode_params(super || {})
       raise
     rescue Rack::Utils::ParameterTypeError, Rack::Utils::InvalidParameterError => e
-      raise ActionController::BadRequest.new(:request, e)
+      raise ActionController::BadRequest.new("Invalid request parameters: #{e.message}")
     end
     alias :request_parameters :POST
 
@@ -385,6 +388,10 @@ module ActionDispatch
     end
 
     def commit_flash
+    end
+
+    def ssl?
+      super || scheme == 'wss'.freeze
     end
 
     private

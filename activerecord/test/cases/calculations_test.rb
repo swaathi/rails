@@ -1,4 +1,5 @@
 require "cases/helper"
+require "models/book"
 require 'models/club'
 require 'models/company'
 require "models/contract"
@@ -25,14 +26,23 @@ class NumericData < ActiveRecord::Base
 end
 
 class CalculationsTest < ActiveRecord::TestCase
-  fixtures :companies, :accounts, :topics, :speedometers, :minivans
+  fixtures :companies, :accounts, :topics, :speedometers, :minivans, :books
 
   def test_should_sum_field
     assert_equal 318, Account.sum(:credit_limit)
   end
 
+  def test_should_sum_arel_attribute
+    assert_equal 318, Account.sum(Account.arel_table[:credit_limit])
+  end
+
   def test_should_average_field
     value = Account.average(:credit_limit)
+    assert_equal 53.0, value
+  end
+
+  def test_should_average_arel_attribute
+    value = Account.average(Account.arel_table[:credit_limit])
     assert_equal 53.0, value
   end
 
@@ -60,12 +70,24 @@ class CalculationsTest < ActiveRecord::TestCase
     assert_equal 60, Account.maximum(:credit_limit)
   end
 
+  def test_should_get_maximum_of_arel_attribute
+    assert_equal 60, Account.maximum(Account.arel_table[:credit_limit])
+  end
+
   def test_should_get_maximum_of_field_with_include
     assert_equal 55, Account.where("companies.name != 'Summit'").references(:companies).includes(:firm).maximum(:credit_limit)
   end
 
+  def test_should_get_maximum_of_arel_attribute_with_include
+    assert_equal 55, Account.where("companies.name != 'Summit'").references(:companies).includes(:firm).maximum(Account.arel_table[:credit_limit])
+  end
+
   def test_should_get_minimum_of_field
     assert_equal 50, Account.minimum(:credit_limit)
+  end
+
+  def test_should_get_minimum_of_arel_attribute
+    assert_equal 50, Account.minimum(Account.arel_table[:credit_limit])
   end
 
   def test_should_group_by_field
@@ -102,6 +124,25 @@ class CalculationsTest < ActiveRecord::TestCase
     assert_equal 60,   c[2]
   end
 
+  def test_should_generate_valid_sql_with_joins_and_group
+    assert_nothing_raised do
+      AuditLog.joins(:developer).group(:id).count
+    end
+  end
+
+  def test_should_calculate_against_given_relation
+    developer = Developer.create!(name: "developer")
+    developer.audit_logs.create!(message: "first log")
+    developer.audit_logs.create!(message: "second log")
+
+    c = developer.audit_logs.joins(:developer).group(:id).count
+
+    assert_equal developer.audit_logs.count, c.size
+    developer.audit_logs.each do |log|
+      assert_equal 1, c[log.id]
+    end
+  end
+
   def test_should_order_by_grouped_field
     c = Account.group(:firm_id).order("firm_id").sum(:credit_limit)
     assert_equal [1, 2, 6, 9], c.keys.compact
@@ -129,6 +170,14 @@ class CalculationsTest < ActiveRecord::TestCase
 
     assert_equal 3, accounts.count(:firm_id)
     assert_equal 3, accounts.select(:firm_id).count
+  end
+
+  def test_limit_should_apply_before_count_arel_attribute
+    accounts = Account.limit(3).where('firm_id IS NOT NULL')
+
+    firm_id_attribute = Account.arel_table[:firm_id]
+    assert_equal 3, accounts.count(firm_id_attribute)
+    assert_equal 3, accounts.select(firm_id_attribute).count
   end
 
   def test_count_should_shortcut_with_limit_zero
@@ -353,8 +402,21 @@ class CalculationsTest < ActiveRecord::TestCase
     assert_equal 6, Account.select("DISTINCT accounts.id").includes(:firm).count
   end
 
+  def test_count_selected_arel_attribute
+    assert_equal 5, Account.select(Account.arel_table[:firm_id]).count
+    assert_equal 4, Account.distinct.select(Account.arel_table[:firm_id]).count
+  end
+
   def test_count_with_column_parameter
     assert_equal 5, Account.count(:firm_id)
+  end
+
+  def test_count_with_arel_attribute
+    assert_equal 5, Account.count(Account.arel_table[:firm_id])
+  end
+
+  def test_count_with_arel_star
+    assert_equal 6, Account.count(Arel.star)
   end
 
   def test_count_with_distinct
@@ -378,10 +440,25 @@ class CalculationsTest < ActiveRecord::TestCase
     assert_equal 4, Account.joins(:firm).distinct.count('companies.id')
   end
 
+  def test_count_arel_attribute_in_joined_table_with
+    assert_equal 5, Account.joins(:firm).count(Company.arel_table[:id])
+    assert_equal 4, Account.joins(:firm).distinct.count(Company.arel_table[:id])
+  end
+
+  def test_count_selected_arel_attribute_in_joined_table
+    assert_equal 5, Account.joins(:firm).select(Company.arel_table[:id]).count
+    assert_equal 4, Account.joins(:firm).distinct.select(Company.arel_table[:id]).count
+  end
+
   def test_should_count_field_in_joined_table_with_group_by
     c = Account.group('accounts.firm_id').joins(:firm).count('companies.id')
 
     [1,6,2,9].each { |firm_id| assert c.keys.include?(firm_id) }
+  end
+
+  def test_should_count_field_of_root_table_with_conflicting_group_by_column
+    assert_equal({ 1 => 1 }, Firm.joins(:accounts).group(:firm_id).count)
+    assert_equal({ 1 => 1 }, Firm.joins(:accounts).group('accounts.firm_id').count)
   end
 
   def test_count_with_no_parameters_isnt_deprecated
@@ -404,6 +481,10 @@ class CalculationsTest < ActiveRecord::TestCase
     assert_equal 1, Account.where(firm_name: '37signals').count
     assert_equal 1, Account.where(firm_name: '37signals').order(:firm_name).count
     assert_equal 1, Account.where(firm_name: '37signals').order(:firm_name).reverse_order.count
+  end
+
+  def test_count_with_block
+    assert_equal 4, Account.count { |account| account.credit_limit.modulo(10).zero? }
   end
 
   def test_should_sum_expression
@@ -469,8 +550,8 @@ class CalculationsTest < ActiveRecord::TestCase
     assert_equal 7, Company.includes(:contracts).sum(:developer_id)
   end
 
-  def test_from_option_with_specified_index
-    if Edge.connection.adapter_name == 'MySQL' or Edge.connection.adapter_name == 'Mysql2'
+  if current_adapter?(:Mysql2Adapter)
+    def test_from_option_with_specified_index
       assert_equal Edge.count(:all), Edge.from('edges USE INDEX(unique_edge_index)').count(:all)
       assert_equal Edge.where('sink_id < 5').count(:all),
           Edge.from('edges USE INDEX(unique_edge_index)').where('sink_id < 5').count(:all)
@@ -666,7 +747,7 @@ class CalculationsTest < ActiveRecord::TestCase
   end
 
   def test_should_reference_correct_aliases_while_joining_tables_of_has_many_through_association
-    assert_nothing_raised ActiveRecord::StatementInvalid do
+    assert_nothing_raised do
       developer = Developer.create!(name: 'developer')
       developer.ratings.includes(comment: :post).where(posts: { id: 1 }).count
     end
@@ -712,5 +793,9 @@ class CalculationsTest < ActiveRecord::TestCase
     assert_equal 50, result[0].credit_limit
     assert_equal 50, result[1].credit_limit
     assert_equal 50, result[2].credit_limit
+  end
+
+  def test_group_by_attribute_with_custom_type
+    assert_equal({ "proposed" => 2, "published" => 2 }, Book.group(:status).count)
   end
 end

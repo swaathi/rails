@@ -146,6 +146,19 @@ class HasAndBelongsToManyAssociationsTest < ActiveRecord::TestCase
     assert_equal 1, country.treaties.count
   end
 
+  def test_join_table_composite_primary_key_should_not_warn
+    country = Country.new(:name => 'India')
+    country.country_id = 'c1'
+    country.save!
+
+    treaty = Treaty.new(:name => 'peace')
+    treaty.treaty_id = 't1'
+    warning = capture(:stderr) do
+      country.treaties << treaty
+    end
+    assert_no_match(/WARNING: Active Record does not support composite primary key\./, warning)
+  end
+
   def test_has_and_belongs_to_many
     david = Developer.find(1)
 
@@ -827,12 +840,12 @@ class HasAndBelongsToManyAssociationsTest < ActiveRecord::TestCase
     assert_no_queries { david.projects.columns }
   end
 
-  def test_attributes_are_being_set_when_initialized_from_habm_association_with_where_clause
+  def test_attributes_are_being_set_when_initialized_from_habtm_association_with_where_clause
     new_developer = projects(:action_controller).developers.where(:name => "Marcelo").build
     assert_equal new_developer.name, "Marcelo"
   end
 
-  def test_attributes_are_being_set_when_initialized_from_habm_association_with_multiple_where_clauses
+  def test_attributes_are_being_set_when_initialized_from_habtm_association_with_multiple_where_clauses
     new_developer = projects(:action_controller).developers.where(:name => "Marcelo").where(:salary => 90_000).build
     assert_equal new_developer.name, "Marcelo"
     assert_equal new_developer.salary, 90_000
@@ -925,7 +938,7 @@ class HasAndBelongsToManyAssociationsTest < ActiveRecord::TestCase
   end
 
   def test_with_symbol_class_name
-    assert_nothing_raised NoMethodError do
+    assert_nothing_raised do
       DeveloperWithSymbolClassName.new
     end
   end
@@ -956,5 +969,30 @@ class HasAndBelongsToManyAssociationsTest < ActiveRecord::TestCase
 
     projects = ProjectUnscopingDavidDefaultScope.includes(:developers).where(id: project.id)
     assert_equal 1, projects.first.developers.size
+  end
+
+  def test_preloaded_associations_size
+    assert_equal Project.first.salaried_developers.size,
+      Project.preload(:salaried_developers).first.salaried_developers.size
+
+    assert_equal Project.includes(:salaried_developers).references(:salaried_developers).first.salaried_developers.size,
+      Project.preload(:salaried_developers).first.salaried_developers.size
+
+    # Nested HATBM
+    first_project = Developer.first.projects.first
+    preloaded_first_project =
+      Developer.preload(projects: :salaried_developers).
+        first.
+        projects.
+        detect { |p| p.id == first_project.id }
+
+    assert preloaded_first_project.salaried_developers.loaded?, true
+    assert_equal first_project.salaried_developers.size, preloaded_first_project.salaried_developers.size
+  end
+
+  def test_has_and_belongs_to_many_is_useable_with_belongs_to_required_by_default
+    assert_difference "Project.first.developers_required_by_default.size", 1 do
+      Project.first.developers_required_by_default.create!(name: "Sean", salary: 50000)
+    end
   end
 end

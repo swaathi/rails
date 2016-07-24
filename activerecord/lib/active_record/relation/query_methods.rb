@@ -3,6 +3,7 @@ require "active_record/relation/query_attribute"
 require "active_record/relation/where_clause"
 require "active_record/relation/where_clause_factory"
 require 'active_model/forbidden_attributes_protection'
+require 'active_support/core_ext/string/filters'
 
 module ActiveRecord
   module QueryMethods
@@ -13,6 +14,8 @@ module ActiveRecord
     # WhereChain objects act as placeholder for queries in which #where does not have any parameter.
     # In this case, #where must be chained with #not to return a new relation.
     class WhereChain
+      include ActiveModel::ForbiddenAttributesProtection
+
       def initialize(scope)
         @scope = scope
       end
@@ -41,6 +44,8 @@ module ActiveRecord
       #    User.where.not(name: "Jon", role: "admin")
       #    # SELECT * FROM users WHERE name != 'Jon' AND role != 'admin'
       def not(opts, *rest)
+        opts = sanitize_forbidden_attributes(opts)
+
         where_clause = @scope.send(:where_clause_factory).build(opts, rest)
 
         @scope.references!(PredicateBuilder.references(opts)) if Hash === opts
@@ -49,16 +54,17 @@ module ActiveRecord
       end
     end
 
+    FROZEN_EMPTY_ARRAY = [].freeze
     Relation::MULTI_VALUE_METHODS.each do |name|
       class_eval <<-CODE, __FILE__, __LINE__ + 1
-        def #{name}_values                    # def select_values
-          @values[:#{name}] || []             #   @values[:select] || []
-        end                                   # end
-                                              #
-        def #{name}_values=(values)           # def select_values=(values)
-          assert_mutability!                  #   assert_mutability!
-          @values[:#{name}] = values          #   @values[:select] = values
-        end                                   # end
+        def #{name}_values
+          @values[:#{name}] || FROZEN_EMPTY_ARRAY
+        end
+
+        def #{name}_values=(values)
+          assert_mutability!
+          @values[:#{name}] = values
+        end
       CODE
     end
 
@@ -93,11 +99,33 @@ module ActiveRecord
     end
 
     def bound_attributes
-      from_clause.binds + arel.bind_values + where_clause.binds + having_clause.binds
+      if limit_value && !string_containing_comma?(limit_value)
+        limit_bind = Attribute.with_cast_value(
+          "LIMIT".freeze,
+          connection.sanitize_limit(limit_value),
+          Type::Value.new,
+        )
+      end
+      if offset_value
+        offset_bind = Attribute.with_cast_value(
+          "OFFSET".freeze,
+          offset_value.to_i,
+          Type::Value.new,
+        )
+      end
+      connection.combine_bind_parameters(
+        from_clause: from_clause.binds,
+        join_clause: arel.bind_values,
+        where_clause: where_clause.binds,
+        having_clause: having_clause.binds,
+        limit: limit_bind,
+        offset: offset_bind,
+      )
     end
 
+    FROZEN_EMPTY_HASH = {}.freeze
     def create_with_value # :nodoc:
-      @values[:create_with] || {}
+      @values[:create_with] || FROZEN_EMPTY_HASH
     end
 
     alias extensions extending_values
@@ -375,7 +403,7 @@ module ActiveRecord
     #
     # This means it can be used in association definitions:
     #
-    #   has_many :comments, -> { unscope where: :trashed }
+    #   has_many :comments, -> { unscope(where: :trashed) }
     #
     def unscope(*args)
       check_if_method_has_arguments!(:unscope, args)
@@ -407,10 +435,30 @@ module ActiveRecord
       self
     end
 
-    # Performs a joins on +args+:
+    # Performs a joins on +args+. The given symbol(s) should match the name of
+    # the association(s).
     #
     #   User.joins(:posts)
-    #   # SELECT "users".* FROM "users" INNER JOIN "posts" ON "posts"."user_id" = "users"."id"
+    #   # SELECT "users".*
+    #   # FROM "users"
+    #   # INNER JOIN "posts" ON "posts"."user_id" = "users"."id"
+    #
+    # Multiple joins:
+    #
+    #   User.joins(:posts, :account)
+    #   # SELECT "users".*
+    #   # FROM "users"
+    #   # INNER JOIN "posts" ON "posts"."user_id" = "users"."id"
+    #   # INNER JOIN "accounts" ON "accounts"."id" = "users"."account_id"
+    #
+    # Nested joins:
+    #
+    #   User.joins(posts: [:comments])
+    #   # SELECT "users".*
+    #   # FROM "users"
+    #   # INNER JOIN "posts" ON "posts"."user_id" = "users"."id"
+    #   # INNER JOIN "comments" "comments_posts"
+    #   #   ON "comments_posts"."post_id" = "posts"."id"
     #
     # You can use strings in order to customize your joins:
     #
@@ -427,6 +475,27 @@ module ActiveRecord
       self.joins_values += args
       self
     end
+
+    # Performs a left outer joins on +args+:
+    #
+    #   User.left_outer_joins(:posts)
+    #   => SELECT "users".* FROM "users" LEFT OUTER JOIN "posts" ON "posts"."user_id" = "users"."id"
+    #
+    def left_outer_joins(*args)
+      check_if_method_has_arguments!(:left_outer_joins, args)
+
+      args.compact!
+      args.flatten!
+
+      spawn.left_outer_joins!(*args)
+    end
+    alias :left_joins :left_outer_joins
+
+    def left_outer_joins!(*args) # :nodoc:
+      self.left_outer_joins_values += args
+      self
+    end
+    alias :left_joins! :left_outer_joins!
 
     # Returns a new relation, which is the result of filtering the current relation
     # according to the conditions in the arguments.
@@ -552,8 +621,6 @@ module ActiveRecord
         WhereChain.new(spawn)
       elsif opts.blank?
         self
-      elsif !opts.is_a?(String) && !opts.respond_to?(:to_h)
-        raise ArgumentError, "Unsupported argument type: #{opts} (#{opts.class})"
       else
         spawn.where!(opts, *rest)
       end
@@ -590,16 +657,22 @@ module ActiveRecord
     # they must differ only by #where (if no #group has been defined) or #having (if a #group is
     # present). Neither relation may have a #limit, #offset, or #distinct set.
     #
-    #    Post.where("id = 1").or(Post.where("id = 2"))
-    #    # SELECT `posts`.* FROM `posts`  WHERE (('id = 1' OR 'id = 2'))
+    #    Post.where("id = 1").or(Post.where("author_id = 3"))
+    #    # SELECT `posts`.* FROM `posts` WHERE ((id = 1) OR (author_id = 3))
     #
     def or(other)
+      unless other.is_a? Relation
+        raise ArgumentError, "You have passed #{other.class.name} object to #or. Pass an ActiveRecord::Relation object instead."
+      end
+
       spawn.or!(other)
     end
 
     def or!(other) # :nodoc:
-      unless structurally_compatible_for_or?(other)
-        raise ArgumentError, 'Relation passed to #or must be structurally compatible'
+      incompatible_values = structurally_incompatible_values_for_or(other)
+
+      unless incompatible_values.empty?
+        raise ArgumentError, "Relation passed to #or must be structurally compatible. Incompatible values: #{incompatible_values}"
       end
 
       self.where_clause = self.where_clause.or(other.where_clause)
@@ -634,6 +707,13 @@ module ActiveRecord
     end
 
     def limit!(value) # :nodoc:
+      if string_containing_comma?(value)
+        # Remove `string_containing_comma?` when removing this deprecation
+        ActiveSupport::Deprecation.warn(<<-WARNING.squish)
+          Passing a string to limit in the form "1,2" is deprecated and will be
+          removed in Rails 5.1. Please call `offset` explicitly instead.
+        WARNING
+      end
       self.limit_value = value
       self
     end
@@ -880,11 +960,18 @@ module ActiveRecord
       arel = Arel::SelectManager.new(table)
 
       build_joins(arel, joins_values.flatten) unless joins_values.empty?
+      build_left_outer_joins(arel, left_outer_joins_values.flatten) unless left_outer_joins_values.empty?
 
       arel.where(where_clause.ast) unless where_clause.empty?
       arel.having(having_clause.ast) unless having_clause.empty?
-      arel.take(connection.sanitize_limit(limit_value)) if limit_value
-      arel.skip(offset_value.to_i) if offset_value
+      if limit_value
+        if string_containing_comma?(limit_value)
+          arel.take(connection.sanitize_limit(limit_value))
+        else
+          arel.take(Arel::Nodes::BindParam.new)
+        end
+      end
+      arel.skip(Arel::Nodes::BindParam.new) if offset_value
       arel.group(*arel_columns(group_values.uniq.reject(&:blank?))) unless group_values.empty?
 
       build_order(arel)
@@ -921,12 +1008,6 @@ module ActiveRecord
       self.send(unscope_code, result)
     end
 
-    def association_for_table(table_name)
-      table_name = table_name.to_s
-      @klass._reflect_on_association(table_name) ||
-        @klass._reflect_on_association(table_name.singularize)
-    end
-
     def build_from
       opts = from_clause.value
       name = from_clause.name
@@ -937,6 +1018,19 @@ module ActiveRecord
       else
         opts
       end
+    end
+
+    def build_left_outer_joins(manager, outer_joins)
+      buckets = outer_joins.group_by do |join|
+        case join
+        when Hash, Symbol, Array
+          :association_join
+        else
+          raise ArgumentError, 'only Hash, Symbol and Array are allowed'
+        end
+      end
+
+      build_join_query(manager, buckets, Arel::Nodes::OuterJoin)
     end
 
     def build_joins(manager, joins)
@@ -954,6 +1048,11 @@ module ActiveRecord
           raise 'unknown class: %s' % join.class.name
         end
       end
+
+      build_join_query(manager, buckets, Arel::Nodes::InnerJoin)
+    end
+
+    def build_join_query(manager, buckets, join_type)
       buckets.default = []
 
       association_joins         = buckets[:association_join]
@@ -969,7 +1068,7 @@ module ActiveRecord
         join_list
       )
 
-      join_infos = join_dependency.join_constraints stashed_association_joins
+      join_infos = join_dependency.join_constraints stashed_association_joins, join_type
 
       join_infos.each do |info|
         info.joins.each { |join| manager.from(join) }
@@ -998,8 +1097,8 @@ module ActiveRecord
 
     def arel_columns(columns)
       columns.map do |field|
-        if (Symbol === field || String === field) && columns_hash.key?(field.to_s) && !from_clause.value
-          arel_table[field]
+        if (Symbol === field || String === field) && (klass.has_attribute?(field) || klass.attribute_alias?(field)) && !from_clause.value
+          arel_attribute(field)
         elsif Symbol === field
           connection.quote_table_name(field.to_s)
         else
@@ -1009,14 +1108,23 @@ module ActiveRecord
     end
 
     def reverse_sql_order(order_query)
-      order_query = ["#{quoted_table_name}.#{quoted_primary_key} ASC"] if order_query.empty?
+      if order_query.empty?
+        return [arel_attribute(primary_key).desc] if primary_key
+        raise IrreversibleOrderError,
+          "Relation has no current order and table has no primary key to be used as default order"
+      end
 
       order_query.flat_map do |o|
         case o
+        when Arel::Attribute
+          o.desc
         when Arel::Nodes::Ordering
           o.reverse
         when String
-          o.to_s.split(',').map! do |s|
+          if does_not_support_reverse?(o)
+            raise IrreversibleOrderError, "Order #{o.inspect} can not be reversed automatically"
+          end
+          o.split(',').map! do |s|
             s.strip!
             s.gsub!(/\sasc\Z/i, ' DESC') || s.gsub!(/\sdesc\Z/i, ' ASC') || s.concat(' DESC')
           end
@@ -1024,6 +1132,13 @@ module ActiveRecord
           o
         end
       end
+    end
+
+    def does_not_support_reverse?(order)
+      #uses sql function with multiple arguments
+      order =~ /\([^()]*,[^()]*\)/ ||
+        # uses "nulls first" like construction
+        order =~ /nulls (first|last)\Z/i
     end
 
     def build_order(arel)
@@ -1047,6 +1162,9 @@ module ActiveRecord
     end
 
     def preprocess_order_args(order_args)
+      order_args.map! do |arg|
+        klass.send(:sanitize_sql_for_order, arg)
+      end
       order_args.flatten!
       validate_order_args(order_args)
 
@@ -1058,12 +1176,10 @@ module ActiveRecord
       order_args.map! do |arg|
         case arg
         when Symbol
-          arg = klass.attribute_alias(arg) if klass.attribute_alias?(arg)
-          table[arg].asc
+          arel_attribute(arg).asc
         when Hash
           arg.map { |field, dir|
-            field = klass.attribute_alias(field) if klass.attribute_alias?(field)
-            table[field].send(dir.downcase)
+            arel_attribute(field).send(dir.downcase)
           }
         else
           arg
@@ -1093,10 +1209,10 @@ module ActiveRecord
       end
     end
 
-    def structurally_compatible_for_or?(other)
-      Relation::SINGLE_VALUE_METHODS.all? { |m| send("#{m}_value") == other.send("#{m}_value") } &&
-        (Relation::MULTI_VALUE_METHODS - [:extending]).all? { |m| send("#{m}_values") == other.send("#{m}_values") } &&
-        (Relation::CLAUSE_METHODS - [:having, :where]).all? { |m| send("#{m}_clause") != other.send("#{m}_clause") }
+    def structurally_incompatible_values_for_or(other)
+      Relation::SINGLE_VALUE_METHODS.reject { |m| send("#{m}_value") == other.send("#{m}_value") } +
+        (Relation::MULTI_VALUE_METHODS - [:extending]).reject { |m| send("#{m}_values") == other.send("#{m}_values") } +
+        (Relation::CLAUSE_METHODS - [:having, :where]).reject { |m| send("#{m}_clause") == other.send("#{m}_clause") }
     end
 
     def new_where_clause
@@ -1111,6 +1227,10 @@ module ActiveRecord
 
     def new_from_clause
       Relation::FromClause.empty
+    end
+
+    def string_containing_comma?(value)
+      ::String === value && value.include?(",")
     end
   end
 end

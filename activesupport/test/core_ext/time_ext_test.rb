@@ -107,6 +107,20 @@ class TimeExtCalculationsTest < ActiveSupport::TestCase
     end
   end
 
+  def test_sec_fraction
+    time = Time.utc(2016, 4, 23, 0, 0, Rational(1,10000000000))
+    assert_equal Rational(1,10000000000), time.sec_fraction
+
+    time = Time.utc(2016, 4, 23, 0, 0, 0.0000000001)
+    assert_equal 0.0000000001.to_r, time.sec_fraction
+
+    time = Time.utc(2016, 4, 23, 0, 0, 0, Rational(1,10000))
+    assert_equal Rational(1,10000000000), time.sec_fraction
+
+    time = Time.utc(2016, 4, 23, 0, 0, 0, 0.0001)
+    assert_equal 0.0001.to_r / 1000000, time.sec_fraction
+  end
+
   def test_beginning_of_day
     assert_equal Time.local(2005,2,4,0,0,0), Time.local(2005,2,4,10,10,10).beginning_of_day
     with_env_tz 'US/Eastern' do
@@ -392,7 +406,7 @@ class TimeExtCalculationsTest < ActiveSupport::TestCase
     assert_equal Time.local(2005,1,2,11,22,33, 8), Time.local(2005,1,2,11,22,33,44).change(:usec => 8)
     assert_equal Time.local(2005,1,2,11,22,33, 8), Time.local(2005,1,2,11,22,33,2).change(:nsec => 8000)
     assert_raise(ArgumentError) { Time.local(2005,1,2,11,22,33, 8).change(:usec => 1, :nsec => 1) }
-    assert_nothing_raised(ArgumentError) { Time.new(2015, 5, 9, 10, 00, 00, '+03:00').change(nsec: 999999999) }
+    assert_nothing_raised { Time.new(2015, 5, 9, 10, 00, 00, '+03:00').change(nsec: 999999999) }
   end
 
   def test_utc_change
@@ -534,6 +548,7 @@ class TimeExtCalculationsTest < ActiveSupport::TestCase
     assert_equal "17:44",                           time.to_s(:time)
     assert_equal "20050221174430",                  time.to_s(:number)
     assert_equal "20050221174430123456789",         time.to_s(:nsec)
+    assert_equal "20050221174430123456",            time.to_s(:usec)
     assert_equal "February 21, 2005 17:44",         time.to_s(:long)
     assert_equal "February 21st, 2005 17:44",       time.to_s(:long_ordinal)
     with_env_tz "UTC" do
@@ -613,6 +628,25 @@ class TimeExtCalculationsTest < ActiveSupport::TestCase
   def test_days_in_month_feb_in_leap_year_without_year_arg
     Time.stub(:now, Time.utc(2008)) do
       assert_equal 29, Time.days_in_month(2)
+    end
+  end
+
+  def test_days_in_year_with_year
+    assert_equal 365, Time.days_in_year(2005)
+    assert_equal 366, Time.days_in_year(2004)
+    assert_equal 366, Time.days_in_year(2000)
+    assert_equal 365, Time.days_in_year(1900)
+  end
+
+  def test_days_in_year_in_common_year_without_year_arg
+    Time.stub(:now, Time.utc(2007)) do
+      assert_equal 365, Time.days_in_year
+    end
+  end
+
+  def test_days_in_year_in_leap_year_without_year_arg
+    Time.stub(:now, Time.utc(2008)) do
+      assert_equal 366, Time.days_in_year
     end
   end
 

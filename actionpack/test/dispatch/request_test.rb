@@ -4,9 +4,13 @@ class BaseRequestTest < ActiveSupport::TestCase
   def setup
     @env = {
       :ip_spoofing_check => true,
-      :tld_length => 1,
       "rack.input" => "foo"
     }
+    @original_tld_length = ActionDispatch::Http::URL.tld_length
+  end
+
+  def teardown
+    ActionDispatch::Http::URL.tld_length = @original_tld_length
   end
 
   def url_for(options = {})
@@ -19,9 +23,9 @@ class BaseRequestTest < ActiveSupport::TestCase
       ip_spoofing_check = env.key?(:ip_spoofing_check) ? env.delete(:ip_spoofing_check) : true
       @trusted_proxies ||= nil
       ip_app = ActionDispatch::RemoteIp.new(Proc.new { }, ip_spoofing_check, @trusted_proxies)
-      tld_length = env.key?(:tld_length) ? env.delete(:tld_length) : 1
+      ActionDispatch::Http::URL.tld_length = env.delete(:tld_length) if env.key?(:tld_length)
+
       ip_app.call(env)
-      ActionDispatch::Http::URL.tld_length = tld_length
 
       env = @env.merge(env)
       ActionDispatch::Request.new(env)
@@ -254,15 +258,6 @@ end
 
 class RequestDomain < BaseRequestTest
   test "domains" do
-    request = stub_request 'HTTP_HOST' => 'www.rubyonrails.org'
-    assert_equal "rubyonrails.org", request.domain
-
-    request = stub_request 'HTTP_HOST' => "www.rubyonrails.co.uk"
-    assert_equal "rubyonrails.co.uk", request.domain(2)
-
-    request = stub_request 'HTTP_HOST' => "www.rubyonrails.co.uk", :tld_length => 2
-    assert_equal "rubyonrails.co.uk", request.domain
-
     request = stub_request 'HTTP_HOST' => "192.168.1.200"
     assert_nil request.domain
 
@@ -271,25 +266,18 @@ class RequestDomain < BaseRequestTest
 
     request = stub_request 'HTTP_HOST' => "192.168.1.200.com"
     assert_equal "200.com", request.domain
+
+    request = stub_request 'HTTP_HOST' => 'www.rubyonrails.org'
+    assert_equal "rubyonrails.org", request.domain
+
+    request = stub_request 'HTTP_HOST' => "www.rubyonrails.co.uk"
+    assert_equal "rubyonrails.co.uk", request.domain(2)
+
+    request = stub_request 'HTTP_HOST' => "www.rubyonrails.co.uk", :tld_length => 2
+    assert_equal "rubyonrails.co.uk", request.domain
   end
 
   test "subdomains" do
-    request = stub_request 'HTTP_HOST' => "www.rubyonrails.org"
-    assert_equal %w( www ), request.subdomains
-    assert_equal "www", request.subdomain
-
-    request = stub_request 'HTTP_HOST' => "www.rubyonrails.co.uk"
-    assert_equal %w( www ), request.subdomains(2)
-    assert_equal "www", request.subdomain(2)
-
-    request = stub_request 'HTTP_HOST' => "dev.www.rubyonrails.co.uk"
-    assert_equal %w( dev www ), request.subdomains(2)
-    assert_equal "dev.www", request.subdomain(2)
-
-    request = stub_request 'HTTP_HOST' => "dev.www.rubyonrails.co.uk", :tld_length => 2
-    assert_equal %w( dev www ), request.subdomains
-    assert_equal "dev.www", request.subdomain
-
     request = stub_request 'HTTP_HOST' => "foobar.foobar.com"
     assert_equal %w( foobar ), request.subdomains
     assert_equal "foobar", request.subdomain
@@ -309,6 +297,22 @@ class RequestDomain < BaseRequestTest
     request = stub_request 'HTTP_HOST' => nil
     assert_equal [], request.subdomains
     assert_equal "", request.subdomain
+
+    request = stub_request 'HTTP_HOST' => "www.rubyonrails.org"
+    assert_equal %w( www ), request.subdomains
+    assert_equal "www", request.subdomain
+
+    request = stub_request 'HTTP_HOST' => "www.rubyonrails.co.uk"
+    assert_equal %w( www ), request.subdomains(2)
+    assert_equal "www", request.subdomain(2)
+
+    request = stub_request 'HTTP_HOST' => "dev.www.rubyonrails.co.uk"
+    assert_equal %w( dev www ), request.subdomains(2)
+    assert_equal "dev.www", request.subdomain(2)
+
+    request = stub_request 'HTTP_HOST' => "dev.www.rubyonrails.co.uk", :tld_length => 2
+    assert_equal %w( dev www ), request.subdomains
+    assert_equal "dev.www", request.subdomain
   end
 end
 
@@ -353,6 +357,17 @@ class RequestPort < BaseRequestTest
 
     request = stub_request 'HTTP_HOST' => 'www.example.org:8080'
     assert_equal ':8080', request.port_string
+  end
+
+  test "server port" do
+    request = stub_request 'SERVER_PORT' => '8080'
+    assert_equal 8080, request.server_port
+
+    request = stub_request 'SERVER_PORT' => '80'
+    assert_equal 80, request.server_port
+
+    request = stub_request 'SERVER_PORT' => ''
+    assert_equal 0, request.server_port
   end
 end
 
@@ -413,6 +428,11 @@ class RequestPath < BaseRequestTest
 end
 
 class RequestHost < BaseRequestTest
+  test "host without specifying port" do
+    request = stub_request 'HTTP_HOST' => 'rubyonrails.org'
+    assert_equal "rubyonrails.org", request.host_with_port
+  end
+
   test "host with default port" do
     request = stub_request 'HTTP_HOST' => 'rubyonrails.org:80'
     assert_equal "rubyonrails.org", request.host_with_port
@@ -421,6 +441,21 @@ class RequestHost < BaseRequestTest
   test "host with non default port" do
     request = stub_request 'HTTP_HOST' => 'rubyonrails.org:81'
     assert_equal "rubyonrails.org:81", request.host_with_port
+  end
+
+  test "raw without specifying port" do
+    request = stub_request 'HTTP_HOST' => 'rubyonrails.org'
+    assert_equal "rubyonrails.org", request.raw_host_with_port
+  end
+
+  test "raw host with default port" do
+    request = stub_request 'HTTP_HOST' => 'rubyonrails.org:80'
+    assert_equal "rubyonrails.org:80", request.raw_host_with_port
+  end
+
+  test "raw host with non default port" do
+    request = stub_request 'HTTP_HOST' => 'rubyonrails.org:81'
+    assert_equal "rubyonrails.org:81", request.raw_host_with_port
   end
 
   test "proxy request" do
@@ -893,6 +928,27 @@ class RequestFormat < BaseRequestTest
       ActionDispatch::Request.ignore_accept_header = old_ignore_accept_header
     end
   end
+
+  test "format taken from the path extension" do
+    request = stub_request 'PATH_INFO' => '/foo.xml'
+    assert_called(request, :parameters, times: 1, returns: {}) do
+      assert_equal [Mime[:xml]], request.formats
+    end
+
+    request = stub_request 'PATH_INFO' => '/foo.123'
+    assert_called(request, :parameters, times: 1, returns: {}) do
+      assert_equal [Mime[:html]], request.formats
+    end
+  end
+
+  test "formats from accept headers have higher precedence than path extension" do
+    request = stub_request 'HTTP_ACCEPT' => 'application/json',
+                           'PATH_INFO' => '/foo.xml'
+
+    assert_called(request, :parameters, times: 1, returns: {}) do
+      assert_equal [Mime[:json]], request.formats
+    end
+  end
 end
 
 class RequestMimeType < BaseRequestTest
@@ -961,15 +1017,29 @@ class RequestParameters < BaseRequestTest
     end
   end
 
+  test "path parameters with invalid UTF8 encoding" do
+    request = stub_request
+
+    err = assert_raises(ActionController::BadRequest) do
+      request.path_parameters = { foo: "\xBE" }
+    end
+
+    assert_equal "Invalid path parameters: Non UTF-8 value: \xBE", err.message
+  end
+
   test "parameters not accessible after rack parse error of invalid UTF8 character" do
     request = stub_request("QUERY_STRING" => "foo%81E=1")
+    assert_raises(ActionController::BadRequest) { request.parameters }
+  end
 
-    2.times do
-      assert_raises(ActionController::BadRequest) do
-        # rack will raise a Rack::Utils::InvalidParameterError when parsing this query string
-        request.parameters
-      end
-    end
+  test "parameters containing an invalid UTF8 character" do
+    request = stub_request("QUERY_STRING" => "foo=%81E")
+    assert_raises(ActionController::BadRequest) { request.parameters }
+  end
+
+  test "parameters containing a deeply nested invalid UTF8 character" do
+    request = stub_request("QUERY_STRING" => "foo[bar]=%81E")
+    assert_raises(ActionController::BadRequest) { request.parameters }
   end
 
   test "parameters not accessible after rack parse error 1" do
@@ -994,8 +1064,8 @@ class RequestParameters < BaseRequestTest
       request.parameters
     end
 
-    assert e.original_exception
-    assert_equal e.original_exception.backtrace, e.backtrace
+    assert_not_nil e.cause
+    assert_equal e.cause.backtrace, e.backtrace
   end
 end
 
@@ -1109,36 +1179,41 @@ class RequestParameterFilter < BaseRequestTest
 end
 
 class RequestEtag < BaseRequestTest
-  test "if_none_match_etags none" do
+  test "always matches *" do
+    request = stub_request('HTTP_IF_NONE_MATCH' => '*')
+
+    assert_equal '*', request.if_none_match
+    assert_equal ['*'], request.if_none_match_etags
+
+    assert request.etag_matches?('"strong"')
+    assert request.etag_matches?('W/"weak"')
+    assert_not request.etag_matches?(nil)
+  end
+
+  test "doesn't match absent If-None-Match" do
     request = stub_request
 
     assert_equal nil, request.if_none_match
     assert_equal [], request.if_none_match_etags
-    assert !request.etag_matches?("foo")
-    assert !request.etag_matches?(nil)
+
+    assert_not request.etag_matches?("foo")
+    assert_not request.etag_matches?(nil)
   end
 
-  test "if_none_match_etags single" do
-    header = 'the-etag'
-    request = stub_request('HTTP_IF_NONE_MATCH' => header)
-
-    assert_equal header, request.if_none_match
-    assert_equal [header], request.if_none_match_etags
-    assert request.etag_matches?("the-etag")
-  end
-
-  test "if_none_match_etags quoted single" do
+  test "matches opaque ETag validators without unquoting" do
     header = '"the-etag"'
     request = stub_request('HTTP_IF_NONE_MATCH' => header)
 
     assert_equal header, request.if_none_match
-    assert_equal ['the-etag'], request.if_none_match_etags
-    assert request.etag_matches?("the-etag")
+    assert_equal ['"the-etag"'], request.if_none_match_etags
+
+    assert request.etag_matches?('"the-etag"')
+    assert_not request.etag_matches?("the-etag")
   end
 
   test "if_none_match_etags multiple" do
     header = 'etag1, etag2, "third etag", "etag4"'
-    expected = ['etag1', 'etag2', 'third etag', 'etag4']
+    expected = ['etag1', 'etag2', '"third etag"', '"etag4"']
     request = stub_request('HTTP_IF_NONE_MATCH' => header)
 
     assert_equal header, request.if_none_match
@@ -1192,5 +1267,25 @@ class RequestVariant < BaseRequestTest
     assert_raise ArgumentError do
       @request.variant = [:phone, 'tablet']
     end
+  end
+end
+
+class RequestFormData < BaseRequestTest
+  test 'media_type is from the FORM_DATA_MEDIA_TYPES array' do
+    assert stub_request('CONTENT_TYPE' => 'application/x-www-form-urlencoded').form_data?
+    assert stub_request('CONTENT_TYPE' => 'multipart/form-data').form_data?
+  end
+
+  test 'media_type is not from the FORM_DATA_MEDIA_TYPES array' do
+    assert !stub_request('CONTENT_TYPE' => 'application/xml').form_data?
+    assert !stub_request('CONTENT_TYPE' => 'multipart/related').form_data?
+  end
+
+  test 'no Content-Type header is provided and the request_method is POST' do
+    request = stub_request('REQUEST_METHOD' => 'POST')
+
+    assert_equal '', request.media_type
+    assert_equal 'POST', request.request_method
+    assert !request.form_data?
   end
 end

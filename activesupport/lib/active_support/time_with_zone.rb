@@ -1,6 +1,7 @@
 require 'active_support/duration'
 require 'active_support/values/time_zone'
 require 'active_support/core_ext/object/acts_like'
+require 'active_support/core_ext/date_and_time/compatibility'
 
 module ActiveSupport
   # A Time-like class that can represent a time in any time zone. Necessary
@@ -44,20 +45,21 @@ module ActiveSupport
     PRECISIONS = Hash.new { |h, n| h[n] = "%FT%T.%#{n}N".freeze }
     PRECISIONS[0] = '%FT%T'.freeze
 
-    include Comparable
+    include Comparable, DateAndTime::Compatibility
     attr_reader :time_zone
 
     def initialize(utc_time, time_zone, local_time = nil, period = nil)
-      @utc, @time_zone, @time = utc_time, time_zone, local_time
+      @utc = utc_time ? transfer_time_values_to_utc_constructor(utc_time) : nil
+      @time_zone, @time = time_zone, local_time
       @period = @utc ? period : get_period_and_ensure_valid_local_time(period)
     end
 
-    # Returns a Time or DateTime instance that represents the time in +time_zone+.
+    # Returns a <tt>Time</tt> instance that represents the time in +time_zone+.
     def time
       @time ||= period.to_local(@utc)
     end
 
-    # Returns a Time or DateTime instance that represents the time in UTC.
+    # Returns a <tt>Time</tt> instance of the simultaneous time in the UTC timezone.
     def utc
       @utc ||= period.to_utc(@time)
     end
@@ -77,10 +79,9 @@ module ActiveSupport
       utc.in_time_zone(new_zone)
     end
 
-    # Returns a <tt>Time.local()</tt> instance of the simultaneous time in your
-    # system's <tt>ENV['TZ']</tt> zone.
+    # Returns a <tt>Time</tt> instance of the simultaneous time in the system timezone.
     def localtime(utc_offset = nil)
-      utc.respond_to?(:getlocal) ? utc.getlocal(utc_offset) : utc.to_time.getlocal(utc_offset)
+      utc.getlocal(utc_offset)
     end
     alias_method :getlocal, :localtime
 
@@ -284,8 +285,8 @@ module ActiveSupport
     # the current object's time and the +other+ time.
     #
     #   Time.zone = 'Eastern Time (US & Canada)' # => 'Eastern Time (US & Canada)'
-    #   now = Time.zone.now # => Sun, 02 Nov 2014 01:26:28 EST -05:00
-    #   now - 1000          # => Sun, 02 Nov 2014 01:09:48 EST -05:00
+    #   now = Time.zone.now # => Mon, 03 Nov 2014 00:26:28 EST -05:00
+    #   now - 1000          # => Mon, 03 Nov 2014 00:09:48 EST -05:00
     #
     # If subtracting a Duration of variable length (i.e., years, months, days),
     # move backward from #time, otherwise move backward from #utc, for accuracy
@@ -294,8 +295,8 @@ module ActiveSupport
     # For instance, a time - 24.hours will go subtract exactly 24 hours, while a
     # time - 1.day will subtract 23-25 hours, depending on the day.
     #
-    #   now - 24.hours      # => Sat, 01 Nov 2014 02:26:28 EDT -04:00
-    #   now - 1.day         # => Sat, 01 Nov 2014 01:26:28 EDT -04:00
+    #   now - 24.hours      # => Sun, 02 Nov 2014 01:26:28 EDT -04:00
+    #   now - 1.day         # => Sun, 02 Nov 2014 00:26:28 EDT -04:00
     def -(other)
       if other.acts_like?(:time)
         to_time - other.to_time
@@ -307,10 +308,48 @@ module ActiveSupport
       end
     end
 
+    # Subtracts an interval of time from the current object's time and returns
+    # the result as a new TimeWithZone object.
+    #
+    #   Time.zone = 'Eastern Time (US & Canada)' # => 'Eastern Time (US & Canada)'
+    #   now = Time.zone.now # => Mon, 03 Nov 2014 00:26:28 EST -05:00
+    #   now.ago(1000)       # => Mon, 03 Nov 2014 00:09:48 EST -05:00
+    #
+    # If we're subtracting a Duration of variable length (i.e., years, months,
+    # days), move backward from #time, otherwise move backward from #utc, for
+    # accuracy when moving across DST boundaries.
+    #
+    # For instance, <tt>time.ago(24.hours)</tt> will move back exactly 24 hours,
+    # while <tt>time.ago(1.day)</tt> will move back 23-25 hours, depending on
+    # the day.
+    #
+    #   now.ago(24.hours)   # => Sun, 02 Nov 2014 01:26:28 EDT -04:00
+    #   now.ago(1.day)      # => Sun, 02 Nov 2014 00:26:28 EDT -04:00
     def ago(other)
       since(-other)
     end
 
+    # Uses Date to provide precise Time calculations for years, months, and days
+    # according to the proleptic Gregorian calendar. The result is returned as a
+    # new TimeWithZone object.
+    #
+    # The +options+ parameter takes a hash with any of these keys:
+    # <tt>:years</tt>, <tt>:months</tt>, <tt>:weeks</tt>, <tt>:days</tt>,
+    # <tt>:hours</tt>, <tt>:minutes</tt>, <tt>:seconds</tt>.
+    #
+    # If advancing by a value of variable length (i.e., years, weeks, months,
+    # days), move forward from #time, otherwise move forward from #utc, for
+    # accuracy when moving across DST boundaries.
+    #
+    #   Time.zone = 'Eastern Time (US & Canada)' # => 'Eastern Time (US & Canada)'
+    #   now = Time.zone.now # => Sun, 02 Nov 2014 01:26:28 EDT -04:00
+    #   now.advance(seconds: 1) # => Sun, 02 Nov 2014 01:26:29 EDT -04:00
+    #   now.advance(minutes: 1) # => Sun, 02 Nov 2014 01:27:28 EDT -04:00
+    #   now.advance(hours: 1)   # => Sun, 02 Nov 2014 01:26:28 EST -05:00
+    #   now.advance(days: 1)    # => Mon, 03 Nov 2014 01:26:28 EST -05:00
+    #   now.advance(weeks: 1)   # => Sun, 09 Nov 2014 01:26:28 EST -05:00
+    #   now.advance(months: 1)  # => Tue, 02 Dec 2014 01:26:28 EST -05:00
+    #   now.advance(years: 1)   # => Mon, 02 Nov 2015 01:26:28 EST -05:00
     def advance(options)
       # If we're advancing a value of variable length (i.e., years, weeks, months, days), advance from #time,
       # otherwise advance from #utc, for accuracy when moving across DST boundaries
@@ -363,11 +402,6 @@ module ActiveSupport
       utc.to_r
     end
 
-    # Returns an instance of Time in the system timezone.
-    def to_time
-      utc.to_time
-    end
-
     # Returns an instance of DateTime with the timezone's UTC offset
     #
     #   Time.zone.now.to_datetime                         # => Tue, 18 Aug 2015 02:32:20 +0000
@@ -416,7 +450,6 @@ module ActiveSupport
     # Ensure proxy class responds to all methods that underlying time instance
     # responds to.
     def respond_to_missing?(sym, include_priv)
-      # consistently respond false to acts_like?(:date), regardless of whether #time is a Time or DateTime
       return false if sym.to_sym == :acts_like_date?
       time.respond_to?(sym, include_priv)
     end
@@ -444,7 +477,7 @@ module ActiveSupport
       end
 
       def transfer_time_values_to_utc_constructor(time)
-        ::Time.utc(time.year, time.month, time.day, time.hour, time.min, time.sec, Rational(time.nsec, 1000))
+        ::Time.utc(time.year, time.month, time.day, time.hour, time.min, time.sec + time.subsec)
       end
 
       def duration_of_variable_length?(obj)

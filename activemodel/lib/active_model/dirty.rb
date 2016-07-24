@@ -26,6 +26,10 @@ module ActiveModel
   #
   #     define_attribute_methods :name
   #
+  #     def initialize(name)
+  #       @name = name
+  #     end
+  #
   #     def name
   #       @name
   #     end
@@ -54,7 +58,7 @@ module ActiveModel
   #
   # A newly instantiated +Person+ object is unchanged:
   #
-  #   person = Person.new
+  #   person = Person.new("Uncle Bob")
   #   person.changed? # => false
   #
   # Change the name:
@@ -115,6 +119,9 @@ module ActiveModel
     extend ActiveSupport::Concern
     include ActiveModel::AttributeMethods
 
+    OPTION_NOT_GIVEN = Object.new # :nodoc:
+    private_constant :OPTION_NOT_GIVEN
+
     included do
       attribute_method_suffix '_changed?', '_change', '_will_change!', '_was'
       attribute_method_suffix '_previously_changed?', '_previous_change'
@@ -170,11 +177,10 @@ module ActiveModel
     end
 
     # Handles <tt>*_changed?</tt> for +method_missing+.
-    def attribute_changed?(attr, options = {}) #:nodoc:
-      result = changes_include?(attr)
-      result &&= options[:to] == __send__(attr) if options.key?(:to)
-      result &&= options[:from] == changed_attributes[attr] if options.key?(:from)
-      result
+    def attribute_changed?(attr, from: OPTION_NOT_GIVEN, to: OPTION_NOT_GIVEN) # :nodoc:
+      !!changes_include?(attr) &&
+        (to == OPTION_NOT_GIVEN || to == __send__(attr)) &&
+        (from == OPTION_NOT_GIVEN || from == changed_attributes[attr])
     end
 
     # Handles <tt>*_was</tt> for +method_missing+.
@@ -183,7 +189,7 @@ module ActiveModel
     end
 
     # Handles <tt>*_previously_changed?</tt> for +method_missing+.
-    def attribute_previously_changed?(attr, options = {}) #:nodoc:
+    def attribute_previously_changed?(attr) #:nodoc:
       previous_changes_include?(attr)
     end
 

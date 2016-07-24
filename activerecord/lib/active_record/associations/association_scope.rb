@@ -124,8 +124,7 @@ module ActiveRecord
         scope = last_chain_scope(scope, table, owner_reflection, owner, association_klass)
 
         reflection = chain_head
-        loop do
-          break unless reflection
+        while reflection
           table = reflection.alias_name
 
           unless reflection == chain_tail
@@ -147,9 +146,9 @@ module ActiveRecord
               scope.includes! item.includes_values
             end
 
+            scope.unscope!(*item.unscope_values)
             scope.where_clause += item.where_clause
             scope.order_values |= item.order_values
-            scope.unscope!(*item.unscope_values)
           end
 
           reflection = reflection.next

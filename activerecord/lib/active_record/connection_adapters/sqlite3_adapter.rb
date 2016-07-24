@@ -1,5 +1,7 @@
 require 'active_record/connection_adapters/abstract_adapter'
 require 'active_record/connection_adapters/statement_pool'
+require 'active_record/connection_adapters/sqlite3/explain_pretty_printer'
+require 'active_record/connection_adapters/sqlite3/quoting'
 require 'active_record/connection_adapters/sqlite3/schema_creation'
 
 gem 'sqlite3', '~> 1.3.6'
@@ -7,7 +9,6 @@ require 'sqlite3'
 
 module ActiveRecord
   module ConnectionHandling # :nodoc:
-    # sqlite3 adapter reuses sqlite_connection.
     def sqlite3_connection(config)
       # Require database.
       unless config[:database]
@@ -33,7 +34,7 @@ module ActiveRecord
       ConnectionAdapters::SQLite3Adapter.new(db, logger, nil, config)
     rescue Errno::ENOENT => error
       if error.message.include?("No such file or directory")
-        raise ActiveRecord::NoDatabaseError.new(error.message, error)
+        raise ActiveRecord::NoDatabaseError
       else
         raise
       end
@@ -49,7 +50,8 @@ module ActiveRecord
     # * <tt>:database</tt> - Path to the database file.
     class SQLite3Adapter < AbstractAdapter
       ADAPTER_NAME = 'SQLite'.freeze
-      include Savepoints
+
+      include SQLite3::Quoting
 
       NATIVE_DATABASE_TYPES = {
         primary_key:  'INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL',
@@ -77,21 +79,15 @@ module ActiveRecord
         SQLite3::SchemaCreation.new self
       end
 
+      def arel_visitor # :nodoc:
+        Arel::Visitors::SQLite.new(self)
+      end
+
       def initialize(connection, logger, connection_options, config)
-        super(connection, logger)
+        super(connection, logger, config)
 
         @active     = nil
-        @statements = StatementPool.new(self.class.type_cast_config_to_integer(config.fetch(:statement_limit) { 1000 }))
-        @config = config
-
-        @visitor = Arel::Visitors::SQLite.new self
-        @quoted_column_names = {}
-
-        if self.class.type_cast_config_to_boolean(config.fetch(:prepared_statements) { true })
-          @prepared_statements = true
-        else
-          @prepared_statements = false
-        end
+        @statements = StatementPool.new(self.class.type_cast_config_to_integer(config[:statement_limit]))
       end
 
       def supports_ddl_transactions?
@@ -129,6 +125,14 @@ module ActiveRecord
         true
       end
 
+      def supports_datetime_with_precision?
+        true
+      end
+
+      def supports_multi_insert?
+        sqlite_version >= '3.7.11'
+      end
+
       def active?
         @active != false
       end
@@ -150,8 +154,12 @@ module ActiveRecord
         true
       end
 
+      def valid_type?(type)
+        true
+      end
+
       # Returns 62. SQLite supports index names up to 64
-      # characters. The rest is used by rails internally to perform
+      # characters. The rest is used by Rails internally to perform
       # temporary rename operations
       def allowed_index_name_length
         index_name_length - 2
@@ -170,76 +178,27 @@ module ActiveRecord
         true
       end
 
-      # QUOTING ==================================================
-
-      def _quote(value) # :nodoc:
-        case value
-        when Type::Binary::Data
-          "x'#{value.hex}'"
-        else
-          super
-        end
-      end
-
-      def _type_cast(value) # :nodoc:
-        case value
-        when BigDecimal
-          value.to_f
-        when String
-          if value.encoding == Encoding::ASCII_8BIT
-            super(value.encode(Encoding::UTF_8))
-          else
-            super
-          end
-        else
-          super
-        end
-      end
-
-      def quote_string(s) #:nodoc:
-        @connection.class.quote(s)
-      end
-
-      def quote_table_name_for_assignment(table, attr)
-        quote_column_name(attr)
-      end
-
-      def quote_column_name(name) #:nodoc:
-        @quoted_column_names[name] ||= %Q("#{name.to_s.gsub('"', '""')}")
-      end
-
       #--
       # DATABASE STATEMENTS ======================================
       #++
 
       def explain(arel, binds = [])
         sql = "EXPLAIN QUERY PLAN #{to_sql(arel, binds)}"
-        ExplainPrettyPrinter.new.pp(exec_query(sql, 'EXPLAIN', []))
+        SQLite3::ExplainPrettyPrinter.new.pp(exec_query(sql, 'EXPLAIN', []))
       end
 
-      class ExplainPrettyPrinter
-        # Pretty prints the result of an EXPLAIN QUERY PLAN in a way that resembles
-        # the output of the SQLite shell:
-        #
-        #   0|0|0|SEARCH TABLE users USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)
-        #   0|1|1|SCAN TABLE posts (~100000 rows)
-        #
-        def pp(result) # :nodoc:
-          result.rows.map do |row|
-            row.join('|')
-          end.join("\n") + "\n"
-        end
-      end
-
-      def exec_query(sql, name = nil, binds = [])
+      def exec_query(sql, name = nil, binds = [], prepare: false)
         type_casted_binds = binds.map { |attr| type_cast(attr.value_for_database) }
 
-        log(sql, name, binds) do
+        log(sql, name, binds, type_casted_binds) do
           # Don't cache statements if they are not prepared
-          if without_prepared_statement?(binds)
+          unless prepare
             stmt    = @connection.prepare(sql)
             begin
               cols    = stmt.columns
+              unless without_prepared_statement?(binds)
+                stmt.bind_params(type_casted_binds)
+              end
               records = stmt.to_a
             ensure
               stmt.close
@@ -252,7 +211,7 @@ module ActiveRecord
             stmt = cache[:stmt]
             cols = cache[:cols] ||= stmt.columns
             stmt.reset!
-            stmt.bind_params type_casted_binds
+            stmt.bind_params(type_casted_binds)
           end
 
           ActiveRecord::Result.new(cols, stmt.to_a)
@@ -273,26 +232,6 @@ module ActiveRecord
         log(sql, name) { @connection.execute(sql) }
       end
 
-      def update_sql(sql, name = nil) #:nodoc:
-        super
-        @connection.changes
-      end
-
-      def delete_sql(sql, name = nil) #:nodoc:
-        sql += " WHERE 1=1" unless sql =~ /WHERE/i
-        super sql, name
-      end
-
-      def insert_sql(sql, name = nil, pk = nil, id_value = nil, sequence_name = nil) #:nodoc:
-        super
-        id_value || @connection.last_insert_row_id
-      end
-      alias :create :insert_sql
-
-      def select_rows(sql, name = nil, binds = [])
-        exec_query(sql, name, binds).rows
-      end
-
       def begin_db_transaction #:nodoc:
         log('begin transaction',nil) { @connection.transaction }
       end
@@ -307,24 +246,44 @@ module ActiveRecord
 
       # SCHEMA STATEMENTS ========================================
 
-      def tables(name = nil, table_name = nil) #:nodoc:
-        sql = <<-SQL
-          SELECT name
-          FROM sqlite_master
-          WHERE (type = 'table' OR type = 'view') AND NOT name = 'sqlite_sequence'
-        SQL
-        sql << " AND name = #{quote_table_name(table_name)}" if table_name
+      def tables(name = nil) # :nodoc:
+        ActiveSupport::Deprecation.warn(<<-MSG.squish)
+          #tables currently returns both tables and views.
+          This behavior is deprecated and will be changed with Rails 5.1 to only return tables.
+          Use #data_sources instead.
+        MSG
 
-        exec_query(sql, 'SCHEMA').map do |row|
-          row['name']
+        if name
+          ActiveSupport::Deprecation.warn(<<-MSG.squish)
+            Passing arguments to #tables is deprecated without replacement.
+          MSG
         end
+
+        data_sources
       end
-      alias data_sources tables
+
+      def data_sources
+        select_values("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name <> 'sqlite_sequence'", 'SCHEMA')
+      end
 
       def table_exists?(table_name)
-        table_name && tables(nil, table_name).any?
+        ActiveSupport::Deprecation.warn(<<-MSG.squish)
+          #table_exists? currently checks both tables and views.
+          This behavior is deprecated and will be changed with Rails 5.1 to only check tables.
+          Use #data_source_exists? instead.
+        MSG
+
+        data_source_exists?(table_name)
       end
-      alias data_source_exists? table_exists?
+
+      def data_source_exists?(table_name)
+        return false unless table_name.present?
+
+        sql = "SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name <> 'sqlite_sequence'"
+        sql << " AND name = #{quote(table_name)}"
+
+        select_values(sql, 'SCHEMA').any?
+      end
 
       def views # :nodoc:
         select_values("SELECT name FROM sqlite_master WHERE type = 'view' AND name <> 'sqlite_sequence'", 'SCHEMA')
@@ -340,7 +299,8 @@ module ActiveRecord
       end
 
       # Returns an array of +Column+ objects for the table specified by +table_name+.
-      def columns(table_name) #:nodoc:
+      def columns(table_name) # :nodoc:
+        table_name = table_name.to_s
         table_structure(table_name).map do |field|
           case field["dflt_value"]
           when /^null$/i
@@ -354,7 +314,7 @@ module ActiveRecord
           collation = field['collation']
           sql_type = field['type']
           type_metadata = fetch_type_metadata(sql_type)
-          new_column(field['name'], field['dflt_value'], type_metadata, field['notnull'].to_i == 0, nil, collation)
+          new_column(field['name'], field['dflt_value'], type_metadata, field['notnull'].to_i == 0, table_name, nil, collation)
         end
       end
 
@@ -559,7 +519,7 @@ module ActiveRecord
           # Older versions of SQLite return:
           #   column *column_name* is not unique
           when /column(s)? .* (is|are) not unique/, /UNIQUE constraint failed: .*/
-            RecordNotUnique.new(message, exception)
+            RecordNotUnique.new(message)
           else
             super
           end
@@ -581,7 +541,7 @@ module ActiveRecord
           result = exec_query(sql, 'SCHEMA').first
 
           if result
-            # Splitting with left parantheses and picking up last will return all
+            # Splitting with left parentheses and picking up last will return all
             # columns separated with comma(,).
             columns_string = result["sql"].split('(').last
 

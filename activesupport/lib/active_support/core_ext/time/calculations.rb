@@ -26,6 +26,12 @@ class Time
       end
     end
 
+    # Returns the number of days in the given year.
+    # If no year is specified, it will use the current year.
+    def days_in_year(year = current.year)
+      days_in_month(2, year) + 337
+    end
+
     # Returns <tt>Time.zone.now</tt> when <tt>Time.zone</tt> or <tt>config.time_zone</tt> are set, otherwise just returns <tt>Time.now</tt>.
     def current
       ::Time.zone ? ::Time.zone.now : ::Time.now
@@ -65,6 +71,13 @@ class Time
   #   Time.new(2012, 8, 29, 23, 59, 59).seconds_until_end_of_day # => 0
   def seconds_until_end_of_day
     end_of_day.to_i - to_i
+  end
+
+  # Returns the fraction of a second as a +Rational+
+  #
+  #   Time.new(2012, 8, 29, 0, 0, 0.5).sec_fraction # => (1/2)
+  def sec_fraction
+    subsec
   end
 
   # Returns a new Time where one or more of the elements have been changed according
@@ -156,7 +169,6 @@ class Time
 
   # Returns a new Time representing the start of the day (0:00)
   def beginning_of_day
-    #(self - seconds_since_midnight).change(usec: 0)
     change(:hour => 0)
   end
   alias :midnight :beginning_of_day
@@ -214,11 +226,6 @@ class Time
     )
   end
   alias :at_end_of_minute :end_of_minute
-
-  # Returns a Range representing the whole day of the current time.
-  def all_day
-    beginning_of_day..end_of_day
-  end
 
   def plus_with_duration(other) #:nodoc:
     if ActiveSupport::Duration === other

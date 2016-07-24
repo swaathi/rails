@@ -57,6 +57,13 @@ module Rails
           )
         },
 
+        'actioncable' => {
+          :include => %w(
+            README.md
+            lib/action_cable/**/*.rb
+          )
+        },
+
         'railties' => {
           :include => %w(
             README.rdoc
@@ -113,6 +120,19 @@ module Rails
           Array(cfg[:exclude]).each do |pattern|
             rdoc_files.exclude("#{cdr}/#{pattern}")
           end
+        end
+
+        # Only generate documentation for files that have been
+        # changed since the API was generated.
+        if Dir.exist?('doc/rdoc') && !ENV['ALL']
+          last_generation = DateTime.rfc2822(File.open('doc/rdoc/created.rid', &:readline))
+
+          rdoc_files.keep_if do |file|
+            File.mtime(file).to_datetime > last_generation
+          end
+
+          # Nothing to do
+          exit(0) if rdoc_files.empty?
         end
       end
 

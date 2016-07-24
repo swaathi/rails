@@ -189,8 +189,8 @@ module ActiveRecord
     #
     # === Caveats
     #
-    # If you're on MySQL, then do not use DDL operations in nested transactions
-    # blocks that are emulated with savepoints. That is, do not execute statements
+    # If you're on MySQL, then do not use Data Definition Language(DDL) operations in nested
+    # transactions blocks that are emulated with savepoints. That is, do not execute statements
     # like 'CREATE TABLE' inside such blocks. This is because MySQL automatically
     # releases all savepoints upon executing a DDL operation. When +transaction+
     # is finished and tries to release the savepoint it created earlier, a
@@ -233,6 +233,24 @@ module ActiveRecord
         set_callback(:commit, :after, *args, &block)
       end
 
+      # Shortcut for <tt>after_commit :hook, on: :create</tt>.
+      def after_create_commit(*args, &block)
+        set_options_for_callbacks!(args, on: :create)
+        set_callback(:commit, :after, *args, &block)
+      end
+
+      # Shortcut for <tt>after_commit :hook, on: :update</tt>.
+      def after_update_commit(*args, &block)
+        set_options_for_callbacks!(args, on: :update)
+        set_callback(:commit, :after, *args, &block)
+      end
+
+      # Shortcut for <tt>after_commit :hook, on: :destroy</tt>.
+      def after_destroy_commit(*args, &block)
+        set_options_for_callbacks!(args, on: :destroy)
+        set_callback(:commit, :after, *args, &block)
+      end
+
       # This callback is called after a create, update, or destroy are rolled back.
       #
       # Please check the documentation of #after_commit for options.
@@ -268,9 +286,11 @@ module ActiveRecord
 
       private
 
-      def set_options_for_callbacks!(args)
-        options = args.last
-        if options.is_a?(Hash) && options[:on]
+      def set_options_for_callbacks!(args, enforced_options = {})
+        options = args.extract_options!.merge!(enforced_options)
+        args << options
+
+        if options[:on]
           fire_on = Array(options[:on])
           assert_valid_transaction_action(fire_on)
           options[:if] = Array(options[:if])
@@ -460,11 +480,11 @@ module ActiveRecord
 
     # Updates the attributes on this particular Active Record object so that
     # if it's associated with a transaction, then the state of the Active Record
-    # object will be updated to reflect the current state of the transaction
+    # object will be updated to reflect the current state of the transaction.
     #
     # The +@transaction_state+ variable stores the states of the associated
     # transaction. This relies on the fact that a transaction can only be in
-    # one rollback or commit (otherwise a list of states would be required)
+    # one rollback or commit (otherwise a list of states would be required).
     # Each Active Record object inside of a transaction carries that transaction's
     # TransactionState.
     #

@@ -19,6 +19,8 @@ module ActionView
 
           def label(label_html_options={}, &block)
             html_options = @input_html_options.slice(:index, :namespace).merge(label_html_options)
+            html_options[:for] ||= @input_html_options[:id] if @input_html_options[:id]
+
             @template_object.label(@object_name, @sanitized_attribute_name, @text, html_options, &block)
           end
         end
@@ -92,18 +94,22 @@ module ActionView
             end
           end
 
-          # Append a hidden field to make sure something will be sent back to the
+          # Prepend a hidden field to make sure something will be sent back to the
           # server if all radio buttons are unchecked.
           if options.fetch('include_hidden', true)
-            rendered_collection + hidden_field
+            hidden_field + rendered_collection
           else
             rendered_collection
           end
         end
 
         def hidden_field #:nodoc:
-          hidden_name = @html_options[:name] || "#{tag_name(false, @options[:index])}[]"
+          hidden_name = @html_options[:name] || hidden_field_name
           @template_object.hidden_field_tag(hidden_name, "", id: nil)
+        end
+
+        def hidden_field_name #:nodoc:
+          "#{tag_name(false, @options[:index])}"
         end
       end
     end

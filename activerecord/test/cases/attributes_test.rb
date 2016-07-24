@@ -38,7 +38,7 @@ module ActiveRecord
       data.reload
 
       assert_equal 2, data.overloaded_float
-      assert_kind_of Fixnum, OverloadedType.last.overloaded_float
+      assert_kind_of Integer, OverloadedType.last.overloaded_float
       assert_equal 2.0, UnoverloadedType.last.overloaded_float
       assert_kind_of Float, UnoverloadedType.last.overloaded_float
     end
@@ -61,6 +61,15 @@ module ActiveRecord
       assert_raise ActiveRecord::UnknownAttributeError do
         UnoverloadedType.new(non_existent_decimal: 1)
       end
+    end
+
+    test "model with nonexistent attribute with default value can be saved" do
+      klass = Class.new(OverloadedType) do
+        attribute :non_existent_string_with_default, :string, default: 'nonexistent'
+      end
+
+      model = klass.new
+      assert model.save
     end
 
     test "changing defaults" do
@@ -135,6 +144,17 @@ module ActiveRecord
       assert_equal 2, klass.new.counter
     end
 
+    test "procs are memoized before type casting" do
+      klass = Class.new(OverloadedType) do
+        @@counter = 0
+        attribute :counter, :integer, default: -> { @@counter += 1 }
+      end
+
+      model = klass.new
+      assert_equal 1, model.counter_before_type_cast
+      assert_equal 1, model.counter_before_type_cast
+    end
+
     test "user provided defaults are persisted even if unchanged" do
       model = OverloadedType.create!
 
@@ -171,6 +191,19 @@ module ActiveRecord
         assert_equal string_range, klass.type_for_attribute("my_range")
         assert_equal int_range, klass.type_for_attribute("my_int_range")
       end
+    end
+
+    test "attributes added after subclasses load are inherited" do
+      parent = Class.new(ActiveRecord::Base) do
+        self.table_name = "topics"
+      end
+
+      child = Class.new(parent)
+      child.new # => force a schema load
+
+      parent.attribute(:foo, Type::Value.new)
+
+      assert_equal(:bar, child.new(foo: :bar).foo)
     end
   end
 end

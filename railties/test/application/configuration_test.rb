@@ -51,7 +51,6 @@ module ApplicationTests
 
     def setup
       build_app
-      boot_rails
       supress_default_config
     end
 
@@ -79,6 +78,24 @@ module ApplicationTests
       end
     end
 
+    test "By default logs tags are not set in development" do
+      restore_default_config
+
+      with_rails_env "development" do
+        app 'development'
+        assert Rails.application.config.log_tags.blank?
+      end
+    end
+
+    test "By default logs are tagged with :request_id in production" do
+      restore_default_config
+
+      with_rails_env "production" do
+        app 'production'
+        assert_equal [:request_id], Rails.application.config.log_tags
+      end
+    end
+
     test "lib dir is on LOAD_PATH during config" do
       app_file 'lib/my_logger.rb', <<-RUBY
         require "logger"
@@ -103,7 +120,7 @@ module ApplicationTests
       RUBY
 
       app_file 'db/migrate/20140708012246_create_user.rb', <<-RUBY
-        class CreateUser < ActiveRecord::Migration
+        class CreateUser < ActiveRecord::Migration::Current
           def change
             create_table :users
           end
@@ -228,6 +245,8 @@ module ApplicationTests
     end
 
     test "the application can be eager loaded even when there are no frameworks" do
+      FileUtils.rm_rf("#{app_path}/app/models/application_record.rb")
+      FileUtils.rm_rf("#{app_path}/app/mailers/application_mailer.rb")
       FileUtils.rm_rf("#{app_path}/config/environments")
       add_to_config <<-RUBY
         config.eager_load = true
@@ -308,34 +327,55 @@ module ApplicationTests
       assert_equal Pathname.new(app_path).join("somewhere"), Rails.public_path
     end
 
-    test "In production mode, config.serve_static_files is off by default" do
+    test "In production mode, config.public_file_server.enabled is off by default" do
       restore_default_config
 
       with_rails_env "production" do
         app 'production'
-        assert_not app.config.serve_static_files
+        assert_not app.config.public_file_server.enabled
       end
     end
 
-    test "In production mode, config.serve_static_files is enabled when RAILS_SERVE_STATIC_FILES is set" do
+    test "In production mode, config.public_file_server.enabled is enabled when RAILS_SERVE_STATIC_FILES is set" do
       restore_default_config
 
       with_rails_env "production" do
         switch_env "RAILS_SERVE_STATIC_FILES", "1" do
           app 'production'
-          assert app.config.serve_static_files
+          assert app.config.public_file_server.enabled
         end
       end
     end
 
-    test "In production mode, config.serve_static_files is disabled when RAILS_SERVE_STATIC_FILES is blank" do
+    test "In production mode, STDOUT logging is enabled when RAILS_LOG_TO_STDOUT is set" do
+      restore_default_config
+
+      with_rails_env "production" do
+        switch_env "RAILS_LOG_TO_STDOUT", "1" do
+          app 'production'
+          assert ActiveSupport::Logger.logger_outputs_to?(app.config.logger, STDOUT)
+        end
+      end
+    end
+
+    test "In production mode, config.public_file_server.enabled is disabled when RAILS_SERVE_STATIC_FILES is blank" do
       restore_default_config
 
       with_rails_env "production" do
         switch_env "RAILS_SERVE_STATIC_FILES", " " do
           app 'production'
-          assert_not app.config.serve_static_files
+          assert_not app.config.public_file_server.enabled
         end
+      end
+    end
+
+    test "config.serve_static_files is deprecated" do
+      make_basic_app do |application|
+        assert_deprecated do
+          application.config.serve_static_files = true
+        end
+
+        assert application.config.public_file_server.enabled
       end
     end
 
@@ -414,6 +454,19 @@ module ApplicationTests
 
       assert_deprecated(/You didn't set `secret_key_base`./) do
         app.env_config
+      end
+    end
+
+    test "raise when secrets.secret_key_base is not a type of string" do
+      app_file 'config/secrets.yml', <<-YAML
+        development:
+          secret_key_base: 123
+      YAML
+
+      app 'development'
+
+      assert_raise(ArgumentError) do
+        app.key_generator
       end
     end
 
@@ -499,6 +552,31 @@ module ApplicationTests
 
       assert_equal 'myamazonaccesskeyid', app.secrets.aws_access_key_id
       assert_equal 'myamazonsecretaccesskey', app.secrets.aws_secret_access_key
+    end
+
+    test "shared secrets saved in config/secrets.yml are loaded in app secrets" do
+      app_file 'config/secrets.yml', <<-YAML
+        shared:
+          api_key: 3b7cd727
+      YAML
+
+      app 'development'
+
+      assert_equal '3b7cd727', app.secrets.api_key
+    end
+
+    test "shared secrets will yield to environment specific secrets" do
+      app_file 'config/secrets.yml', <<-YAML
+        shared:
+          api_key: 3b7cd727
+
+        development:
+          api_key: abc12345
+      YAML
+
+      app 'development'
+
+      assert_equal 'abc12345', app.secrets.api_key
     end
 
     test "blank config/secrets.yml does not crash the loading process" do
@@ -632,7 +710,7 @@ module ApplicationTests
 
         private
 
-        def form_authenticity_token; token; end # stub the authenticy token
+        def form_authenticity_token(*args); token; end # stub the authenticity token
       end
       RUBY
 
@@ -700,7 +778,7 @@ module ApplicationTests
       require "mail"
       _ = ActionMailer::Base
 
-      assert_equal [::MyMailInterceptor], ::Mail.send(:class_variable_get, "@@delivery_interceptors")
+      assert_equal [::MyMailInterceptor], ::Mail.class_variable_get(:@@delivery_interceptors)
     end
 
     test "registers multiple interceptors with ActionMailer" do
@@ -713,7 +791,7 @@ module ApplicationTests
       require "mail"
       _ = ActionMailer::Base
 
-      assert_equal [::MyMailInterceptor, ::MyOtherMailInterceptor], ::Mail.send(:class_variable_get, "@@delivery_interceptors")
+      assert_equal [::MyMailInterceptor, ::MyOtherMailInterceptor], ::Mail.class_variable_get(:@@delivery_interceptors)
     end
 
     test "registers preview interceptors with ActionMailer" do
@@ -765,7 +843,7 @@ module ApplicationTests
       require "mail"
       _ = ActionMailer::Base
 
-      assert_equal [::MyMailObserver], ::Mail.send(:class_variable_get, "@@delivery_notification_observers")
+      assert_equal [::MyMailObserver], ::Mail.class_variable_get(:@@delivery_notification_observers)
     end
 
     test "registers multiple observers with ActionMailer" do
@@ -778,7 +856,7 @@ module ApplicationTests
       require "mail"
       _ = ActionMailer::Base
 
-      assert_equal [::MyMailObserver, ::MyOtherMailObserver], ::Mail.send(:class_variable_get, "@@delivery_notification_observers")
+      assert_equal [::MyMailObserver, ::MyOtherMailObserver], ::Mail.class_variable_get(:@@delivery_notification_observers)
     end
 
     test "allows setting the queue name for the ActionMailer::DeliveryJob" do
@@ -791,7 +869,7 @@ module ApplicationTests
       require "mail"
       _ = ActionMailer::Base
 
-      assert_equal 'test_default', ActionMailer::Base.send(:class_variable_get, "@@deliver_later_queue_name")
+      assert_equal 'test_default', ActionMailer::Base.class_variable_get(:@@deliver_later_queue_name)
     end
 
     test "valid timezone is setup correctly" do
@@ -945,7 +1023,7 @@ module ApplicationTests
       app 'development'
 
       post "/posts.json", '{ "title": "foo", "name": "bar" }', "CONTENT_TYPE" => "application/json"
-      assert_equal '{"title"=>"foo"}', last_response.body
+      assert_equal '<ActionController::Parameters {"title"=>"foo"} permitted: false>', last_response.body
     end
 
     test "config.action_controller.permit_all_parameters = true" do
@@ -1009,7 +1087,7 @@ module ApplicationTests
       assert_equal %w( controller action format ), ActionController::Parameters.always_permitted_parameters
     end
 
-    test "config.action_controller.always_permitted_parameters = ['controller','action','format'] does not raise exeception" do
+    test "config.action_controller.always_permitted_parameters = ['controller','action','format'] does not raise exception" do
       app_file 'app/controllers/posts_controller.rb', <<-RUBY
       class PostsController < ActionController::Base
         def create
@@ -1106,6 +1184,22 @@ module ApplicationTests
           application.config.session_store :active_record_store
         end
       end
+    end
+
+    test "default session store initializer does not overwrite the user defined session store even if it is disabled" do
+      make_basic_app do |application|
+        application.config.session_store :disabled
+      end
+
+      assert_equal nil, app.config.session_store
+    end
+
+    test "default session store initializer sets session store to cookie store" do
+      session_options = { key: "_myapp_session", cookie_only: true }
+      make_basic_app
+
+      assert_equal ActionDispatch::Session::CookieStore, app.config.session_store
+      assert_equal session_options, app.config.session_options
     end
 
     test "config.log_level with custom logger" do
@@ -1283,6 +1377,21 @@ module ApplicationTests
       assert_equal 'custom key', Rails.application.config.my_custom_config['key']
     end
 
+    test "config_for uses the Pathname object if it is provided" do
+      app_file 'config/custom.yml', <<-RUBY
+      development:
+        key: 'custom key'
+      RUBY
+
+      add_to_config <<-RUBY
+        config.my_custom_config = config_for(Pathname.new(Rails.root.join("config/custom.yml")))
+      RUBY
+
+      app 'development'
+
+      assert_equal 'custom key', Rails.application.config.my_custom_config['key']
+    end
+
     test "config_for raises an exception if the file does not exist" do
       add_to_config <<-RUBY
         config.my_custom_config = config_for('custom')
@@ -1353,6 +1462,62 @@ module ApplicationTests
       end
 
       assert_match 'YAML syntax error occurred while parsing', exception.message
+    end
+
+    test "config_for allows overriding the environment" do
+      app_file 'config/custom.yml', <<-RUBY
+        test:
+          key: 'walrus'
+        production:
+            key: 'unicorn'
+      RUBY
+
+      add_to_config <<-RUBY
+          config.my_custom_config = config_for('custom', env: 'production')
+      RUBY
+      require "#{app_path}/config/environment"
+
+      assert_equal 'unicorn', Rails.application.config.my_custom_config['key']
+    end
+
+    test "api_only is false by default" do
+      app 'development'
+      refute Rails.application.config.api_only
+    end
+
+    test "api_only generator config is set when api_only is set" do
+      add_to_config <<-RUBY
+        config.api_only = true
+      RUBY
+      app 'development'
+
+      Rails.application.load_generators
+      assert Rails.configuration.api_only
+    end
+
+    test "debug_exception_response_format is :api by default if api_only is enabled" do
+      add_to_config <<-RUBY
+        config.api_only = true
+      RUBY
+      app 'development'
+
+      assert_equal :api, Rails.configuration.debug_exception_response_format
+    end
+
+    test "debug_exception_response_format can be overridden" do
+      add_to_config <<-RUBY
+        config.api_only = true
+      RUBY
+
+      app_file 'config/environments/development.rb', <<-RUBY
+      Rails.application.configure do
+        config.debug_exception_response_format = :default
+      end
+      RUBY
+
+      app 'development'
+
+      assert_equal :default, Rails.configuration.debug_exception_response_format
     end
   end
 end

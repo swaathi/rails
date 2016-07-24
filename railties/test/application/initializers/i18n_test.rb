@@ -6,7 +6,6 @@ module ApplicationTests
 
     def setup
       build_app
-      boot_rails
       FileUtils.rm_rf "#{app_path}/config/environments"
       require "rails/all"
     end
@@ -245,7 +244,7 @@ fr:
       assert_fallbacks de: [:de, :'en-US', :en]
     end
 
-    test "[shortcut] config.i18n.fallbacks = [{ :ca => :'es-ES' }] initializes fallbacks with a mapping de-AT => de-DE" do
+    test "[shortcut] config.i18n.fallbacks = [{ :ca => :'es-ES' }] initializes fallbacks with a mapping ca => es-ES" do
       I18n::Railtie.config.i18n.fallbacks.map = { :ca => :'es-ES' }
       load_app
       assert_fallbacks ca: [:ca, :"es-ES", :es, :en]
@@ -255,6 +254,12 @@ fr:
       I18n::Railtie.config.i18n.fallbacks = [:'en-US', { :ca => :'es-ES' }]
       load_app
       assert_fallbacks ca: [:ca, :"es-ES", :es, :'en-US', :en]
+    end
+
+    test "[shortcut] config.i18n.fallbacks = { ca: :en } initializes fallbacks with a mapping ca => :en" do
+      I18n::Railtie.config.i18n.fallbacks = { ca: :en }
+      load_app
+      assert_fallbacks ca: [:ca, :en]
     end
 
     test "disable config.i18n.enforce_available_locales" do

@@ -24,6 +24,8 @@ require 'models/molecule'
 require 'models/member'
 require 'models/member_detail'
 require 'models/organization'
+require 'models/guitar'
+require 'models/tuning_peg'
 
 class TestAutosaveAssociationsInGeneral < ActiveRecord::TestCase
   def test_autosave_validation
@@ -397,6 +399,87 @@ class TestDefaultAutosaveAssociationOnAHasManyAssociationWithAcceptsNestedAttrib
     assert_not molecule.persisted?, 'Molecule should not be persisted when its electrons are invalid'
   end
 
+  def test_errors_should_be_indexed_when_passed_as_array
+    guitar = Guitar.new
+    tuning_peg_valid = TuningPeg.new
+    tuning_peg_valid.pitch = 440.0
+    tuning_peg_invalid = TuningPeg.new
+
+    guitar.tuning_pegs = [tuning_peg_valid, tuning_peg_invalid]
+
+    assert_not tuning_peg_invalid.valid?
+    assert tuning_peg_valid.valid?
+    assert_not guitar.valid?
+    assert_equal ["is not a number"], guitar.errors["tuning_pegs[1].pitch"]
+    assert_not_equal ["is not a number"], guitar.errors["tuning_pegs.pitch"]
+  end
+
+  def test_errors_should_be_indexed_when_global_flag_is_set
+    old_attribute_config = ActiveRecord::Base.index_nested_attribute_errors
+    ActiveRecord::Base.index_nested_attribute_errors = true
+
+    molecule = Molecule.new
+    valid_electron = Electron.new(name: 'electron')
+    invalid_electron = Electron.new
+
+    molecule.electrons = [valid_electron, invalid_electron]
+
+    assert_not invalid_electron.valid?
+    assert valid_electron.valid?
+    assert_not molecule.valid?
+    assert_equal ["can't be blank"], molecule.errors["electrons[1].name"]
+    assert_not_equal ["can't be blank"], molecule.errors["electrons.name"]
+  ensure
+    ActiveRecord::Base.index_nested_attribute_errors = old_attribute_config
+  end
+
+  def test_errors_details_should_be_set
+    molecule = Molecule.new
+    valid_electron = Electron.new(name: 'electron')
+    invalid_electron = Electron.new
+
+    molecule.electrons = [valid_electron, invalid_electron]
+
+    assert_not invalid_electron.valid?
+    assert valid_electron.valid?
+    assert_not molecule.valid?
+    assert_equal [{error: :blank}], molecule.errors.details["electrons.name"]
+  end
+
+  def test_errors_details_should_be_indexed_when_passed_as_array
+    guitar = Guitar.new
+    tuning_peg_valid = TuningPeg.new
+    tuning_peg_valid.pitch = 440.0
+    tuning_peg_invalid = TuningPeg.new
+
+    guitar.tuning_pegs = [tuning_peg_valid, tuning_peg_invalid]
+
+    assert_not tuning_peg_invalid.valid?
+    assert tuning_peg_valid.valid?
+    assert_not guitar.valid?
+    assert_equal [{error: :not_a_number, value: nil}] , guitar.errors.details["tuning_pegs[1].pitch"]
+    assert_equal [], guitar.errors.details["tuning_pegs.pitch"]
+  end
+
+  def test_errors_details_should_be_indexed_when_global_flag_is_set
+    old_attribute_config = ActiveRecord::Base.index_nested_attribute_errors
+    ActiveRecord::Base.index_nested_attribute_errors = true
+
+    molecule = Molecule.new
+    valid_electron = Electron.new(name: 'electron')
+    invalid_electron = Electron.new
+
+    molecule.electrons = [valid_electron, invalid_electron]
+
+    assert_not invalid_electron.valid?
+    assert valid_electron.valid?
+    assert_not molecule.valid?
+    assert_equal [{error: :blank}], molecule.errors.details["electrons[1].name"]
+    assert_equal [], molecule.errors.details["electrons.name"]
+  ensure
+    ActiveRecord::Base.index_nested_attribute_errors = old_attribute_config
+  end
+
   def test_valid_adding_with_nested_attributes
     molecule = Molecule.new
     valid_electron = Electron.new(name: 'electron')
@@ -666,7 +749,7 @@ class TestDestroyAsPartOfAutosaveAssociation < ActiveRecord::TestCase
   end
 
   # has_one
-  def test_should_destroy_a_child_association_as_part_of_the_save_transaction_if_it_was_marked_for_destroyal
+  def test_should_destroy_a_child_association_as_part_of_the_save_transaction_if_it_was_marked_for_destruction
     assert !@pirate.ship.marked_for_destruction?
 
     @pirate.ship.mark_for_destruction
@@ -726,7 +809,7 @@ class TestDestroyAsPartOfAutosaveAssociation < ActiveRecord::TestCase
   end
 
   # belongs_to
-  def test_should_destroy_a_parent_association_as_part_of_the_save_transaction_if_it_was_marked_for_destroyal
+  def test_should_destroy_a_parent_association_as_part_of_the_save_transaction_if_it_was_marked_for_destruction
     assert !@ship.pirate.marked_for_destruction?
 
     @ship.pirate.mark_for_destruction

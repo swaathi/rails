@@ -15,7 +15,6 @@ module ActionDispatch
   class FileHandler
     def initialize(root, index: 'index', headers: {})
       @root          = root.chomp('/')
-      @compiled_root = /^#{Regexp.escape(root)}/
       @file_server   = ::Rack::File.new(@root, headers)
       @index         = index
     end
@@ -28,8 +27,8 @@ module ActionDispatch
     # in the server's `public/` directory (see Static#call).
     def match?(path)
       path = ::Rack::Utils.unescape_path path
-      return false unless path.valid_encoding?
-      path = Rack::Utils.clean_path_info path
+      return false unless ::Rack::Utils.valid_path? path
+      path = ::Rack::Utils.clean_path_info path
 
       paths = [path, "#{path}#{ext}", "#{path}/#{@index}#{ext}"]
 
@@ -47,7 +46,7 @@ module ActionDispatch
     end
 
     def call(env)
-      serve ActionDispatch::Request.new env
+      serve(Rack::Request.new(env))
     end
 
     def serve(request)
@@ -83,7 +82,7 @@ module ActionDispatch
       end
 
       def gzip_encoding_accepted?(request)
-        request.accept_encoding =~ /\bgzip\b/i
+        request.accept_encoding.any? { |enc, quality| enc =~ /\bgzip\b/i }
       end
 
       def gzip_file_path(path)
@@ -120,7 +119,7 @@ module ActionDispatch
     end
 
     def call(env)
-      req = ActionDispatch::Request.new env
+      req = Rack::Request.new env
 
       if req.get? || req.head?
         path = req.path_info.chomp('/'.freeze)

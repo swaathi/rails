@@ -1,4 +1,5 @@
 require 'active_support/inflections'
+require 'active_support/core_ext/regexp'
 
 module ActiveSupport
   # The Inflector transforms words from singular to plural, class names to table
@@ -87,7 +88,7 @@ module ActiveSupport
     #
     #   camelize(underscore('SSLError'))  # => "SslError"
     def underscore(camel_cased_word)
-      return camel_cased_word unless camel_cased_word =~ /[A-Z-]|::/
+      return camel_cased_word unless /[A-Z-]|::/.match?(camel_cased_word)
       word = camel_cased_word.to_s.gsub('::'.freeze, '/'.freeze)
       word.gsub!(/(?:(?<=([A-Za-z\d]))|\b)(#{inflections.acronym_regex})(?=\b|[^a-z])/) { "#{$1 && '_'.freeze }#{$2.downcase}" }
       word.gsub!(/([A-Z\d]+)([A-Z][a-z])/, '\1_\2'.freeze)
@@ -140,6 +141,15 @@ module ActiveSupport
       result
     end
 
+    # Converts just the first character to uppercase.
+    #
+    #   upcase_first('what a Lovely Day') # => "What a Lovely Day"
+    #   upcase_first('w')                 # => "W"
+    #   upcase_first('')                  # => ""
+    def upcase_first(string)
+      string.length > 0 ? string[0].upcase.concat(string[1..-1]) : ''
+    end
+
     # Capitalizes all the words and replaces some characters in the string to
     # create a nicer looking title. +titleize+ is meant for creating pretty
     # output. It is not used in the Rails internals.
@@ -173,7 +183,7 @@ module ActiveSupport
     #
     # Singular names are not handled correctly:
     #
-    #   classify('calculus')     # => "Calculu"
+    #   classify('calculus')     # => "Calculus"
     def classify(table_name)
       # strip out any leading schema name
       camelize(singularize(table_name.to_s.sub(/.*\./, ''.freeze)))
@@ -229,8 +239,8 @@ module ActiveSupport
 
     # Tries to find a constant with the name specified in the argument string.
     #
-    #   'Module'.constantize   # => Module
-    #   'Foo::Bar'.constantize # => Foo::Bar
+    #   constantize('Module')   # => Module
+    #   constantize('Foo::Bar') # => Foo::Bar
     #
     # The name is assumed to be the one of a top-level constant, no matter
     # whether it starts with "::" or not. No lexical context is taken into
@@ -239,8 +249,8 @@ module ActiveSupport
     #   C = 'outside'
     #   module M
     #     C = 'inside'
-    #     C               # => 'inside'
-    #     'C'.constantize # => 'outside', same as ::C
+    #     C                # => 'inside'
+    #     constantize('C') # => 'outside', same as ::C
     #   end
     #
     # NameError is raised when the name is not in CamelCase or the constant is
@@ -304,7 +314,7 @@ module ActiveSupport
       raise if e.name && !(camel_cased_word.to_s.split("::").include?(e.name.to_s) ||
         e.name.to_s == camel_cased_word.to_s)
     rescue ArgumentError => e
-      raise unless e.message =~ /not missing constant #{const_regexp(camel_cased_word)}\!$/
+      raise unless /not missing constant #{const_regexp(camel_cased_word)}!$/.match?(e.message)
     end
 
     # Returns the suffix that should be added to a number to denote the position

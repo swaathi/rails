@@ -1,7 +1,6 @@
 require 'abstract_unit'
 require 'action_view'
 require 'action_controller'
-require 'active_support/deprecation'
 
 class I18nTestMailer < ActionMailer::Base
   configure do |c|
@@ -26,7 +25,9 @@ end
 class ActionMailerI18nWithControllerTest < ActionDispatch::IntegrationTest
   Routes = ActionDispatch::Routing::RouteSet.new
   Routes.draw do
-    get ':controller(/:action(/:id))'
+    ActiveSupport::Deprecation.silence do
+      get ':controller(/:action(/:id))'
+    end
   end
 
   class RoutedRackApp

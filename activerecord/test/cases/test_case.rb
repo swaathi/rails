@@ -12,10 +12,6 @@ module ActiveRecord
       SQLCounter.clear_log
     end
 
-    def assert_date_from_db(expected, actual, message = nil)
-      assert_equal expected.to_s, actual.to_s, message
-    end
-
     def capture_sql
       SQLCounter.clear_log
       yield
@@ -74,12 +70,6 @@ module ActiveRecord
   class Mysql2TestCase < TestCase
     def self.run(*args)
       super if current_adapter?(:Mysql2Adapter)
-    end
-  end
-
-  class MysqlTestCase < TestCase
-    def self.run(*args)
-      super if current_adapter?(:MysqlAdapter)
     end
   end
 

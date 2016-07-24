@@ -3,22 +3,29 @@ require 'active_support/core_ext/hash'
 module ActiveJob
   # Raised when an exception is raised during job arguments deserialization.
   #
-  # Wraps the original exception raised as +original_exception+.
+  # Wraps the original exception raised as +cause+.
   class DeserializationError < StandardError
+    def initialize(e = nil) #:nodoc:
+      if e
+        ActiveSupport::Deprecation.warn("Passing #original_exception is deprecated and has no effect. " \
+                                        "Exceptions will automatically capture the original exception.", caller)
+      end
+
+      super("Error while trying to deserialize arguments: #{$!.message}")
+      set_backtrace $!.backtrace
+    end
+
     # The original exception that was raised during deserialization of job
     # arguments.
-    attr_reader :original_exception
-
-    def initialize(e) #:nodoc:
-      super("Error while trying to deserialize arguments: #{e.message}")
-      @original_exception = e
-      set_backtrace e.backtrace
+    def original_exception
+      ActiveSupport::Deprecation.warn("#original_exception is deprecated. Use #cause instead.", caller)
+      cause
     end
   end
 
   # Raised when an unsupported argument type is set as a job argument. We
-  # currently support NilClass, Fixnum, Float, String, TrueClass, FalseClass,
-  # Bignum and objects that can be represented as GlobalIDs (ex: Active Record).
+  # currently support NilClass, Integer, Fixnum, Float, String, TrueClass, FalseClass,
+  # Bignum, BigDecimal, and objects that can be represented as GlobalIDs (ex: Active Record).
   # Raised if you set the key for a Hash something else than a string or
   # a symbol. Also raised when trying to serialize an object which can't be
   # identified with a Global ID - such as an unpersisted Active Record model.
@@ -27,7 +34,8 @@ module ActiveJob
   module Arguments
     extend self
     # :nodoc:
-    TYPE_WHITELIST = [ NilClass, Fixnum, Float, String, TrueClass, FalseClass, Bignum ]
+    # Calls #uniq since Integer, Fixnum, and Bignum are all the same class on Ruby 2.4+
+    TYPE_WHITELIST = [ NilClass, String, Integer, Fixnum, Bignum, Float, BigDecimal, TrueClass, FalseClass ].uniq
 
     # Serializes a set of arguments. Whitelisted types are returned
     # as-is. Arrays/Hashes are serialized element by element.
@@ -41,8 +49,8 @@ module ActiveJob
     # All other types are deserialized using GlobalID.
     def deserialize(arguments)
       arguments.map { |argument| deserialize_argument(argument) }
-    rescue => e
-      raise DeserializationError.new(e)
+    rescue
+      raise DeserializationError
     end
 
     private

@@ -12,14 +12,13 @@ module ApplicationTests
 
     def setup
       build_app
-      boot_rails
     end
 
     def teardown
       teardown_app
     end
 
-    test "rails app is present" do
+    test "Rails app is present" do
       assert File.exist?(app_path("config"))
     end
 

@@ -2,6 +2,7 @@ require 'active_support/core_ext/hash/keys'
 require 'active_support/key_generator'
 require 'active_support/message_verifier'
 require 'active_support/json'
+require 'rack/utils'
 
 module ActionDispatch
   class Request
@@ -12,6 +13,12 @@ module ActionDispatch
     end
 
     # :stopdoc:
+    prepend Module.new {
+      def commit_cookie_jar!
+        cookie_jar.commit!
+      end
+    }
+
     def have_cookie_jar?
       has_header? 'action_dispatch.cookies'.freeze
     end
@@ -77,6 +84,12 @@ module ActionDispatch
   #   # It can be read using the signed method `cookies.signed[:name]`
   #   cookies.signed[:user_id] = current_user.id
   #
+  #   # Sets an encrypted cookie value before sending it to the client which
+  #   # prevent users from reading and tampering with its value.
+  #   # The cookie is signed by your app's `secrets.secret_key_base` value.
+  #   # It can be read using the encrypted method `cookies.encrypted[:name]`
+  #   cookies.encrypted[:discount] = 45
+  #
   #   # Sets a "permanent" cookie (which expires in 20 years from now).
   #   cookies.permanent[:login] = "XJ-122"
   #
@@ -89,6 +102,7 @@ module ActionDispatch
   #   cookies.size                  # => 2
   #   JSON.parse(cookies[:lat_lon]) # => [47.68, -122.37]
   #   cookies.signed[:login]        # => "XJ-122"
+  #   cookies.encrypted[:discount]  # => 45
   #
   # Example for deleting:
   #
@@ -324,7 +338,7 @@ module ActionDispatch
       end
 
       def to_header
-        @cookies.map { |k,v| "#{k}=#{v}" }.join ';'
+        @cookies.map { |k,v| "#{escape(k)}=#{escape(v)}" }.join '; '
       end
 
       def handle_options(options) #:nodoc:
@@ -405,6 +419,10 @@ module ActionDispatch
       self.always_write_cookie = false
 
       private
+
+      def escape(string)
+        ::Rack::Utils.escape(string)
+      end
 
       def make_set_cookie_header(header)
         header = @set_cookies.inject(header) { |m, (k, v)|

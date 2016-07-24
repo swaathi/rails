@@ -31,15 +31,15 @@ class DefaultsDeliveryMethodsTest < ActiveSupport::TestCase
     assert_equal settings, ActionMailer::Base.smtp_settings
   end
 
-  test "default file delivery settings" do
-    settings = {location: "#{Dir.tmpdir}/mails"}
+  test "default file delivery settings (with Rails.root)" do
+    settings = {location: "#{Rails.root}/tmp/mails"}
     assert_equal settings, ActionMailer::Base.file_settings
   end
 
   test "default sendmail settings" do
     settings = {
       location:  '/usr/sbin/sendmail',
-      arguments: '-i -t'
+      arguments: '-i'
     }
     assert_equal settings, ActionMailer::Base.sendmail_settings
   end

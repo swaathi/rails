@@ -3,6 +3,8 @@ require 'abstract_unit'
 require 'active_support/cache'
 require 'dependencies_test_helpers'
 
+require 'pathname'
+
 module ActiveSupport
   module Cache
     module Strategy
@@ -20,6 +22,18 @@ module ActiveSupport
             body.each { }
             assert LocalCacheRegistry.cache_for(key), 'should still have a cache'
             body.close
+            assert_nil LocalCacheRegistry.cache_for(key)
+          end
+
+          def test_local_cache_cleared_and_response_should_be_present_on_invalid_parameters_error
+            key = "super awesome key"
+            assert_nil LocalCacheRegistry.cache_for key
+            middleware = Middleware.new('<3', key).new(->(env) {
+              assert LocalCacheRegistry.cache_for(key), 'should have a cache'
+              raise Rack::Utils::InvalidParameterError
+            })
+            response = middleware.call({})
+            assert response, 'response should exist'
             assert_nil LocalCacheRegistry.cache_for(key)
           end
 
@@ -126,6 +140,16 @@ class CacheKeyTest < ActiveSupport::TestCase
 end
 
 class CacheStoreSettingTest < ActiveSupport::TestCase
+  def test_memory_store_gets_created_if_no_arguments_passed_to_lookup_store_method
+    store = ActiveSupport::Cache.lookup_store
+    assert_kind_of(ActiveSupport::Cache::MemoryStore, store)
+  end
+
+  def test_memory_store
+    store = ActiveSupport::Cache.lookup_store :memory_store
+    assert_kind_of(ActiveSupport::Cache::MemoryStore, store)
+  end
+
   def test_file_fragment_cache_store
     store = ActiveSupport::Cache.lookup_store :file_store, "/path/to/cache/directory"
     assert_kind_of(ActiveSupport::Cache::FileStore, store)
@@ -264,6 +288,20 @@ module CacheStoreBehavior
     assert_not_called(@cache, :write) do
       assert_nil @cache.fetch('foo') { 'baz' }
     end
+  end
+
+  def test_fetch_with_forced_cache_miss_with_block
+    @cache.write('foo', 'bar')
+    assert_equal 'foo_bar', @cache.fetch('foo', force: true) { 'foo_bar' }
+  end
+
+  def test_fetch_with_forced_cache_miss_without_block
+    @cache.write('foo', 'bar')
+    assert_raises(ArgumentError) do
+      @cache.fetch('foo', force: true)
+    end
+
+    assert_equal 'bar', @cache.read('foo')
   end
 
   def test_should_read_and_write_hash
@@ -416,7 +454,7 @@ module CacheStoreBehavior
 
   def test_race_condition_protection_skipped_if_not_defined
     @cache.write('foo', 'bar')
-    time = @cache.send(:read_entry, 'foo', {}).expires_at
+    time = @cache.send(:read_entry, @cache.send(:normalize_key, 'foo', {}), {}).expires_at
 
     Time.stub(:now, Time.at(time)) do
       result = @cache.fetch('foo') do
@@ -493,30 +531,40 @@ module CacheStoreBehavior
 
   def test_cache_hit_instrumentation
     key = "test_key"
-    subscribe_executed = false
-    ActiveSupport::Notifications.subscribe "cache_read.active_support" do |name, start, finish, id, payload|
-      subscribe_executed = true
-      assert_equal :fetch, payload[:super_operation]
-      assert payload[:hit]
+    @events = []
+    ActiveSupport::Notifications.subscribe "cache_read.active_support" do |*args|
+      @events << ActiveSupport::Notifications::Event.new(*args)
     end
     assert @cache.write(key, "1", :raw => true)
     assert @cache.fetch(key) {}
-    assert subscribe_executed
+    assert_equal 1, @events.length
+    assert_equal 'cache_read.active_support', @events[0].name
+    assert_equal :fetch, @events[0].payload[:super_operation]
+    assert @events[0].payload[:hit]
   ensure
     ActiveSupport::Notifications.unsubscribe "cache_read.active_support"
   end
 
   def test_cache_miss_instrumentation
-    subscribe_executed = false
-    ActiveSupport::Notifications.subscribe "cache_read.active_support" do |name, start, finish, id, payload|
-      subscribe_executed = true
-      assert_equal :fetch, payload[:super_operation]
-      assert_not payload[:hit]
+    @events = []
+    ActiveSupport::Notifications.subscribe(/^cache_(.*)\.active_support$/) do |*args|
+      @events << ActiveSupport::Notifications::Event.new(*args)
     end
     assert_not @cache.fetch("bad_key") {}
-    assert subscribe_executed
+    assert_equal 3, @events.length
+    assert_equal 'cache_read.active_support', @events[0].name
+    assert_equal 'cache_generate.active_support', @events[1].name
+    assert_equal 'cache_write.active_support', @events[2].name
+    assert_equal :fetch, @events[0].payload[:super_operation]
+    assert_not @events[0].payload[:hit]
   ensure
     ActiveSupport::Notifications.unsubscribe "cache_read.active_support"
+  end
+
+  def test_can_call_deprecated_namesaced_key
+    assert_deprecated "`namespaced_key` is deprecated" do
+      @cache.send(:namespaced_key, 111, {})
+    end
   end
 end
 
@@ -625,6 +673,21 @@ module LocalCacheBehavior
     end
   end
 
+  def test_local_cache_of_read_nil
+    @cache.with_local_cache do
+      assert_equal nil, @cache.read('foo')
+      @cache.send(:bypass_local_cache) { @cache.write 'foo', 'bar' }
+      assert_equal nil, @cache.read('foo')
+    end
+  end
+
+  def test_local_cache_fetch
+    @cache.with_local_cache do
+      @cache.send(:local_cache).write 'foo', 'bar'
+      assert_equal 'bar', @cache.send(:local_cache).fetch('foo')
+    end
+  end
+
   def test_local_cache_of_write_nil
     @cache.with_local_cache do
       assert @cache.write('foo', nil)
@@ -677,6 +740,15 @@ module LocalCacheBehavior
     }
     app = @cache.middleware.new(app)
     app.call({})
+  end
+
+  def test_can_call_deprecated_set_cache_value
+    @cache.with_local_cache do
+      assert_deprecated "`set_cache_value` is deprecated" do
+        @cache.send(:set_cache_value, 1, 'foo', :ignored, {})
+      end
+      assert_equal 1, @cache.read('foo')
+    end
   end
 end
 
@@ -746,10 +818,12 @@ class FileStoreTest < ActiveSupport::TestCase
   include AutoloadingCacheBehavior
 
   def test_clear
-    filepath = File.join(cache_dir, ".gitkeep")
-    FileUtils.touch(filepath)
+    gitkeep = File.join(cache_dir, ".gitkeep")
+    keep = File.join(cache_dir, ".keep")
+    FileUtils.touch([gitkeep, keep])
     @cache.clear
-    assert File.exist?(filepath)
+    assert File.exist?(gitkeep)
+    assert File.exist?(keep)
   end
 
   def test_clear_without_cache_dir
@@ -762,14 +836,19 @@ class FileStoreTest < ActiveSupport::TestCase
     assert_equal 1, @cache.read("a"*10000)
   end
 
+  def test_long_uri_encoded_keys
+    @cache.write("%"*870, 1)
+    assert_equal 1, @cache.read("%"*870)
+  end
+
   def test_key_transformation
-    key = @cache.send(:key_file_path, "views/index?id=1")
+    key = @cache.send(:normalize_key, "views/index?id=1", {})
     assert_equal "views/index?id=1", @cache.send(:file_path_key, key)
   end
 
   def test_key_transformation_with_pathname
     FileUtils.touch(File.join(cache_dir, "foo"))
-    key = @cache_with_pathname.send(:key_file_path, "views/index?id=1")
+    key = @cache_with_pathname.send(:normalize_key, "views/index?id=1", {})
     assert_equal "views/index?id=1", @cache_with_pathname.send(:file_path_key, key)
   end
 
@@ -777,7 +856,7 @@ class FileStoreTest < ActiveSupport::TestCase
   # remain valid
   def test_filename_max_size
     key = "#{'A' * ActiveSupport::Cache::FileStore::FILENAME_MAX_SIZE}"
-    path = @cache.send(:key_file_path, key)
+    path = @cache.send(:normalize_key, key, {})
     Dir::Tmpname.create(path) do |tmpname, n, opts|
       assert File.basename(tmpname+'.lock').length <= 255, "Temp filename too long: #{File.basename(tmpname+'.lock').length}"
     end
@@ -787,7 +866,7 @@ class FileStoreTest < ActiveSupport::TestCase
   # If filename is 'AAAAB', where max size is 4, the returned path should be AAAA/B
   def test_key_transformation_max_filename_size
     key = "#{'A' * ActiveSupport::Cache::FileStore::FILENAME_MAX_SIZE}B"
-    path = @cache.send(:key_file_path, key)
+    path = @cache.send(:normalize_key, key, {})
     assert path.split('/').all? { |dir_name| dir_name.size <= ActiveSupport::Cache::FileStore::FILENAME_MAX_SIZE}
     assert_equal 'B', File.basename(path)
   end
@@ -795,7 +874,7 @@ class FileStoreTest < ActiveSupport::TestCase
   # If nothing has been stored in the cache, there is a chance the cache directory does not yet exist
   # Ensure delete_matched gracefully handles this case
   def test_delete_matched_when_cache_directory_does_not_exist
-    assert_nothing_raised(Exception) do
+    assert_nothing_raised do
       ActiveSupport::Cache::FileStore.new('/test/cache/directory').delete_matched(/does_not_exist/)
     end
   end
@@ -803,7 +882,7 @@ class FileStoreTest < ActiveSupport::TestCase
   def test_delete_does_not_delete_empty_parent_dir
     sub_cache_dir = File.join(cache_dir, 'subdir/')
     sub_cache_store = ActiveSupport::Cache::FileStore.new(sub_cache_dir)
-    assert_nothing_raised(Exception) do
+    assert_nothing_raised do
       assert sub_cache_store.write('foo', 'bar')
       assert sub_cache_store.delete('foo')
     end
@@ -837,6 +916,12 @@ class FileStoreTest < ActiveSupport::TestCase
     assert_equal false, @cache.write(1, "aaaaaaaaaa", unless_exist: true)
     @cache.write(1, nil)
     assert_equal false, @cache.write(1, "aaaaaaaaaa", unless_exist: true)
+  end
+
+  def test_can_call_deprecated_key_file_path
+    assert_deprecated "`key_file_path` is deprecated" do
+      assert_equal 111, @cache.send(:key_file_path, 111)
+    end
   end
 end
 
@@ -1012,6 +1097,12 @@ class MemCacheStoreTest < ActiveSupport::TestCase
     value << 'bingo'
     assert_not_equal value, @cache.read('foo')
   end
+
+  def test_can_call_deprecated_escape_key
+    assert_deprecated "`escape_key` is deprecated" do
+      assert_equal 111, @cache.send(:escape_key, 111)
+    end
+  end
 end
 
 class NullStoreTest < ActiveSupport::TestCase
@@ -1081,18 +1172,22 @@ class CacheStoreLoggerTest < ActiveSupport::TestCase
     assert @buffer.string.present?
   end
 
+  def test_log_with_string_namespace
+    @cache.fetch('foo', {namespace: 'string_namespace'}) { 'bar' }
+    assert_match %r{string_namespace:foo}, @buffer.string
+  end
+
+  def test_log_with_proc_namespace
+    proc = Proc.new do
+      "proc_namespace"
+    end
+    @cache.fetch('foo', {:namespace => proc}) { 'bar' }
+    assert_match %r{proc_namespace:foo}, @buffer.string
+  end
+
   def test_mute_logging
     @cache.mute { @cache.fetch('foo') { 'bar' } }
     assert @buffer.string.blank?
-  end
-
-  def test_multi_read_loggin
-    @cache.write 'hello', 'goodbye'
-    @cache.write 'world', 'earth'
-
-    @cache.read_multi('hello', 'world')
-
-    assert_match "Caches multi read:\n- hello\n- world", @buffer.string
   end
 end
 

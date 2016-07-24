@@ -8,7 +8,6 @@ module ApplicationTests
 
       def setup
         build_app
-        boot_rails
         FileUtils.rm_rf("#{app_path}/config/environments")
       end
 
@@ -28,12 +27,12 @@ module ApplicationTests
 
       def db_create_and_drop(expected_database)
         Dir.chdir(app_path) do
-          output = `bin/rake db:create`
-          assert_empty output
+          output = `bin/rails db:create`
+          assert_match(/Created database/, output)
           assert File.exist?(expected_database)
           assert_equal expected_database, ActiveRecord::Base.connection_config[:database]
-          output = `bin/rake db:drop`
-          assert_empty output
+          output = `bin/rails db:drop`
+          assert_match(/Dropped database/, output)
           assert !File.exist?(expected_database)
         end
       end
@@ -49,11 +48,63 @@ module ApplicationTests
         db_create_and_drop database_url_db_name
       end
 
+      def with_database_existing
+        Dir.chdir(app_path) do
+          set_database_url
+          `bin/rails db:create`
+          yield
+          `bin/rails db:drop`
+        end
+      end
+
+      test 'db:create failure because database exists' do
+        with_database_existing do
+          output = `bin/rails db:create 2>&1`
+          assert_match(/already exists/, output)
+          assert_equal 0, $?.exitstatus
+        end
+      end
+
+      def with_bad_permissions
+        Dir.chdir(app_path) do
+          set_database_url
+          FileUtils.chmod("-w", "db")
+          yield
+          FileUtils.chmod("+w", "db")
+        end
+      end
+
+      test 'db:create failure because bad permissions' do
+        with_bad_permissions do
+          output = `bin/rails db:create 2>&1`
+          assert_match(/Couldn't create database/, output)
+          assert_equal 1, $?.exitstatus
+        end
+      end
+
+      test 'db:drop failure because database does not exist' do
+        Dir.chdir(app_path) do
+          output = `bin/rails db:drop:_unsafe --trace 2>&1`
+          assert_match(/does not exist/, output)
+          assert_equal 0, $?.exitstatus
+        end
+      end
+
+      test 'db:drop failure because bad permissions' do
+        with_database_existing do
+          with_bad_permissions do
+            output = `bin/rails db:drop 2>&1`
+            assert_match(/Couldn't drop/, output)
+            assert_equal 1, $?.exitstatus
+          end
+        end
+      end
+
       def db_migrate_and_status(expected_database)
         Dir.chdir(app_path) do
           `bin/rails generate model book title:string;
-           bin/rake db:migrate`
-          output = `bin/rake db:migrate:status`
+           bin/rails db:migrate`
+          output = `bin/rails db:migrate:status`
           assert_match(%r{database:\s+\S*#{Regexp.escape(expected_database)}}, output)
           assert_match(/up\s+\d{14}\s+Create books/, output)
         end
@@ -73,7 +124,7 @@ module ApplicationTests
       def db_schema_dump
         Dir.chdir(app_path) do
           `bin/rails generate model book title:string;
-           bin/rake db:migrate db:schema:dump`
+           bin/rails db:migrate db:schema:dump`
           schema_dump = File.read("db/schema.rb")
           assert_match(/create_table \"books\"/, schema_dump)
         end
@@ -91,7 +142,7 @@ module ApplicationTests
       def db_fixtures_load(expected_database)
         Dir.chdir(app_path) do
           `bin/rails generate model book title:string;
-           bin/rake db:migrate db:fixtures:load`
+           bin/rails db:migrate db:fixtures:load`
           assert_match expected_database, ActiveRecord::Base.connection_config[:database]
           require "#{app_path}/app/models/book"
           assert_equal 2, Book.count
@@ -113,7 +164,7 @@ module ApplicationTests
         require "#{app_path}/config/environment"
         Dir.chdir(app_path) do
           `bin/rails generate model admin::book title:string;
-           bin/rake db:migrate db:fixtures:load`
+           bin/rails db:migrate db:fixtures:load`
           require "#{app_path}/app/models/admin/book"
           assert_equal 2, Admin::Book.count
         end
@@ -122,10 +173,10 @@ module ApplicationTests
       def db_structure_dump_and_load(expected_database)
         Dir.chdir(app_path) do
           `bin/rails generate model book title:string;
-           bin/rake db:migrate db:structure:dump`
+           bin/rails db:migrate db:structure:dump`
           structure_dump = File.read("db/structure.sql")
           assert_match(/CREATE TABLE \"books\"/, structure_dump)
-          `bin/rake environment db:drop db:structure:load`
+          `bin/rails environment db:drop db:structure:load`
           assert_match expected_database, ActiveRecord::Base.connection_config[:database]
           require "#{app_path}/app/models/book"
           #if structure is not loaded correctly, exception would be raised
@@ -149,7 +200,7 @@ module ApplicationTests
           # create table without migrations
           `bin/rails runner 'ActiveRecord::Base.connection.create_table(:posts) {|t| t.string :title }'`
 
-          stderr_output = capture(:stderr) { `bin/rake db:structure:dump` }
+          stderr_output = capture(:stderr) { `bin/rails db:structure:dump` }
           assert_empty stderr_output
           structure_dump = File.read("db/structure.sql")
           assert_match(/CREATE TABLE \"posts\"/, structure_dump)
@@ -169,15 +220,15 @@ module ApplicationTests
           list_tables = lambda { `bin/rails runner 'p ActiveRecord::Base.connection.tables'`.strip }
 
           assert_equal '["posts"]', list_tables[]
-          `bin/rake db:schema:load`
-          assert_equal '["posts", "comments", "schema_migrations"]', list_tables[]
+          `bin/rails db:schema:load`
+          assert_equal '["posts", "comments", "schema_migrations", "ar_internal_metadata"]', list_tables[]
 
           app_file 'db/structure.sql', <<-SQL
             CREATE TABLE "users" ("id" INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, "name" varchar(255));
           SQL
 
-          `bin/rake db:structure:load`
-          assert_equal '["posts", "comments", "schema_migrations", "users"]', list_tables[]
+          `bin/rails db:structure:load`
+          assert_equal '["posts", "comments", "schema_migrations", "ar_internal_metadata", "users"]', list_tables[]
         end
       end
 
@@ -199,7 +250,7 @@ module ApplicationTests
             end
           RUBY
 
-          `bin/rake db:schema:load`
+          `bin/rails db:schema:load`
 
           tables = `bin/rails runner 'p ActiveRecord::Base.connection.tables'`.strip
           assert_match(/"geese"/, tables)
@@ -212,7 +263,7 @@ module ApplicationTests
       def db_test_load_structure
         Dir.chdir(app_path) do
           `bin/rails generate model book title:string;
-           bin/rake db:migrate db:structure:dump db:test:load_structure`
+           bin/rails db:migrate db:structure:dump db:test:load_structure`
           ActiveRecord::Base.configurations = Rails.application.config.database_configuration
           ActiveRecord::Base.establish_connection :test
           require "#{app_path}/app/models/book"
@@ -248,7 +299,7 @@ module ApplicationTests
           RUBY
 
           Dir.chdir(app_path) do
-            database_path = `bin/rake db:setup`
+            database_path = `bin/rails db:setup`
             assert_equal "development.sqlite3", File.basename(database_path.strip)
           end
         ensure

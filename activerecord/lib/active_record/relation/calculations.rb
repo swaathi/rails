@@ -37,7 +37,11 @@ module ActiveRecord
     # Note: not all valid {Relation#select}[rdoc-ref:QueryMethods#select] expressions are valid #count expressions. The specifics differ
     # between databases. In invalid cases, an error from the database is thrown.
     def count(column_name = nil)
-      calculate(:count, column_name)
+      if block_given?
+        to_a.count { |*block_args| yield(*block_args) }
+      else
+        calculate(:count, column_name)
+      end
     end
 
     # Calculates the average value on a given column. Returns +nil+ if there's
@@ -89,7 +93,7 @@ module ActiveRecord
     #
     # There are two basic forms of output:
     #
-    # * Single aggregate value: The single value is type cast to Fixnum for COUNT, Float
+    # * Single aggregate value: The single value is type cast to Integer for COUNT, Float
     #   for AVG, and the given column's type for everything else.
     #
     # * Grouped values: This returns an ordered hash of the values and groups them. It
@@ -155,15 +159,7 @@ module ActiveRecord
     # See also #ids.
     #
     def pluck(*column_names)
-      column_names.map! do |column_name|
-        if column_name.is_a?(Symbol) && attribute_alias?(column_name)
-          attribute_alias(column_name)
-        else
-          column_name.to_s
-        end
-      end
-
-      if loaded? && (column_names - @klass.column_names).empty?
+      if loaded? && (column_names.map(&:to_s) - @klass.attribute_names - @klass.attribute_aliases.keys).empty?
         return @records.pluck(*column_names)
       end
 
@@ -172,7 +168,7 @@ module ActiveRecord
       else
         relation = spawn
         relation.select_values = column_names.map { |cn|
-          columns_hash.key?(cn) ? arel_table[cn] : cn
+          @klass.has_attribute?(cn) || @klass.attribute_alias?(cn) ? arel_attribute(cn) : cn
         }
         result = klass.connection.select_all(relation.arel, nil, bound_attributes)
         result.cast_values(klass.attribute_types)
@@ -219,6 +215,8 @@ module ActiveRecord
     end
 
     def aggregate_column(column_name)
+      return column_name if Arel::Expressions === column_name
+
       if @klass.column_names.include?(column_name.to_s)
         Arel::Attribute.new(@klass.unscoped.table, column_name)
       else
@@ -273,15 +271,10 @@ module ActiveRecord
       else
         group_fields = group_attrs
       end
+      group_fields = arel_columns(group_fields)
 
-      group_aliases = group_fields.map { |field|
-        column_alias_for(field)
-      }
-      group_columns = group_aliases.zip(group_fields).map { |aliaz,field|
-        [aliaz, field]
-      }
-
-      group = group_fields
+      group_aliases = group_fields.map { |field| column_alias_for(field) }
+      group_columns = group_aliases.zip(group_fields)
 
       if operation == 'count' && column_name == :all
         aggregate_alias = 'count_all'
@@ -297,7 +290,7 @@ module ActiveRecord
       ]
       select_values += select_values unless having_clause.empty?
 
-      select_values.concat group_fields.zip(group_aliases).map { |field,aliaz|
+      select_values.concat group_columns.map { |aliaz, field|
         if field.respond_to?(:as)
           field.as(aliaz)
         else
@@ -306,7 +299,7 @@ module ActiveRecord
       }
 
       relation = except(:group)
-      relation.group_values  = group
+      relation.group_values  = group_fields
       relation.select_values = select_values
 
       calculated_data = @klass.connection.select_all(relation, nil, relation.bound_attributes)
@@ -319,8 +312,10 @@ module ActiveRecord
 
       Hash[calculated_data.map do |row|
         key = group_columns.map { |aliaz, col_name|
-          column = calculated_data.column_types.fetch(aliaz) do
-            type_for(col_name)
+          column = type_for(col_name) do
+            calculated_data.column_types.fetch(aliaz) do
+              Type::Value.new
+            end
           end
           type_cast_calculated_value(row[aliaz], column)
         }
@@ -353,9 +348,9 @@ module ActiveRecord
       @klass.connection.table_alias_for(table_name)
     end
 
-    def type_for(field)
+    def type_for(field, &block)
       field_name = field.respond_to?(:name) ? field.name.to_s : field.to_s.split('.').last
-      @klass.type_for_attribute(field_name)
+      @klass.type_for_attribute(field_name, &block)
     end
 
     def type_cast_calculated_value(value, type, operation = nil)
@@ -367,9 +362,9 @@ module ActiveRecord
       end
     end
 
-    # TODO: refactor to allow non-string `select_values` (eg. Arel nodes).
     def select_for_count
       if select_values.present?
+        return select_values.first if select_values.one?
         select_values.join(", ")
       else
         :all

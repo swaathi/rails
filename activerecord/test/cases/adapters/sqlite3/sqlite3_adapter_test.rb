@@ -130,11 +130,6 @@ module ActiveRecord
         assert_equal 'UTF-8', @conn.encoding
       end
 
-      def test_bind_value_substitute
-        bind_param = @conn.substitute_at('foo')
-        assert_equal Arel.sql('?'), bind_param.to_sql
-      end
-
       def test_exec_no_binds
         with_example_table 'id int, data string' do
           result = @conn.exec_query('SELECT id, data FROM ex')
@@ -218,24 +213,12 @@ module ActiveRecord
         assert_equal "''", @conn.quote_string("'")
       end
 
-      def test_insert_sql
-        with_example_table do
-          2.times do |i|
-            rv = @conn.insert_sql "INSERT INTO ex (number) VALUES (#{i})"
-            assert_equal(i + 1, rv)
-          end
-
-          records = @conn.execute "SELECT * FROM ex"
-          assert_equal 2, records.length
-        end
-      end
-
-      def test_insert_sql_logged
+      def test_insert_logged
         with_example_table do
           sql = "INSERT INTO ex (number) VALUES (10)"
           name = "foo"
           assert_logged [[sql, name, []]] do
-            @conn.insert_sql sql, name
+            @conn.insert(sql, name)
           end
         end
       end
@@ -244,7 +227,7 @@ module ActiveRecord
         with_example_table do
           sql = "INSERT INTO ex (number) VALUES (10)"
           idval = 'vuvuzela'
-          id = @conn.insert_sql sql, nil, nil, idval
+          id = @conn.insert(sql, nil, nil, idval)
           assert_equal idval, id
         end
       end
@@ -284,9 +267,9 @@ module ActiveRecord
 
       def test_tables
         with_example_table do
-          assert_equal %w{ ex }, @conn.tables
+          ActiveSupport::Deprecation.silence { assert_equal %w{ ex }, @conn.tables }
           with_example_table 'id integer PRIMARY KEY AUTOINCREMENT, number integer', 'people' do
-            assert_equal %w{ ex people }.sort, @conn.tables.sort
+            ActiveSupport::Deprecation.silence { assert_equal %w{ ex people }.sort, @conn.tables.sort }
           end
         end
       end
@@ -294,10 +277,12 @@ module ActiveRecord
       def test_tables_logs_name
         sql = <<-SQL
           SELECT name FROM sqlite_master
-          WHERE (type = 'table' OR type = 'view') AND NOT name = 'sqlite_sequence'
+          WHERE type IN ('table','view') AND name <> 'sqlite_sequence'
         SQL
         assert_logged [[sql.squish, 'SCHEMA', []]] do
-          @conn.tables('hello')
+          ActiveSupport::Deprecation.silence do
+            @conn.tables('hello')
+          end
         end
       end
 
@@ -313,11 +298,12 @@ module ActiveRecord
         with_example_table do
           sql = <<-SQL
             SELECT name FROM sqlite_master
-            WHERE (type = 'table' OR type = 'view')
-            AND NOT name = 'sqlite_sequence' AND name = \"ex\"
+            WHERE type IN ('table','view') AND name <> 'sqlite_sequence' AND name = 'ex'
           SQL
           assert_logged [[sql.squish, 'SCHEMA', []]] do
-            assert @conn.table_exists?('ex')
+            ActiveSupport::Deprecation.silence do
+              assert @conn.table_exists?('ex')
+            end
           end
         end
       end
@@ -398,12 +384,6 @@ module ActiveRecord
 
       def test_no_primary_key
         with_example_table 'number integer not null' do
-          assert_nil @conn.primary_key('ex')
-        end
-      end
-
-      def test_composite_primary_key
-        with_example_table 'id integer, number integer, foo integer, PRIMARY KEY (id, number)' do
           assert_nil @conn.primary_key('ex')
         end
       end

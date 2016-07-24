@@ -1,3 +1,5 @@
+require 'active_support/core_ext/object/blank'
+
 module ActiveSupport
   # Usually key value pairs are handled something like this:
   #
@@ -20,7 +22,7 @@ module ActiveSupport
   # To raise an exception when the value is blank, append a
   # bang to the key name, like:
   #
-  #   h.dog! # => raises KeyError
+  #   h.dog! # => raises KeyError: key not found: :dog
   #
   class OrderedOptions < Hash
     alias_method :_get, :[] # preserve the original #[] method

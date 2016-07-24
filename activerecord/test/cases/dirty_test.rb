@@ -5,23 +5,6 @@ require 'models/parrot'
 require 'models/person'   # For optimistic locking
 require 'models/aircraft'
 
-class Pirate # Just reopening it, not defining it
-  attr_accessor :detected_changes_in_after_update # Boolean for if changes are detected
-  attr_accessor :changes_detected_in_after_update # Actual changes
-
-  after_update :check_changes
-
-private
-  # after_save/update and the model itself
-  # can end up checking dirty status and acting on the results
-  def check_changes
-    if self.changed?
-      self.detected_changes_in_after_update = true
-      self.changes_detected_in_after_update = self.changes
-    end
-  end
-end
-
 class NumericData < ActiveRecord::Base
   self.table_name = 'numeric_data'
 end
@@ -37,8 +20,8 @@ class DirtyTest < ActiveRecord::TestCase
   def test_attribute_changes
     # New record - no changes.
     pirate = Pirate.new
-    assert !pirate.catchphrase_changed?
-    assert_nil pirate.catchphrase_change
+    assert_equal false, pirate.catchphrase_changed?
+    assert_equal false, pirate.non_validated_parrot_id_changed?
 
     # Change catchphrase.
     pirate.catchphrase = 'arrr'
@@ -732,6 +715,17 @@ class DirtyTest < ActiveRecord::TestCase
     pirate.update_attribute(:catchphrase, nil)
 
     assert_equal "arr", pirate.catchphrase
+  end
+
+  test "attributes assigned but not selected are dirty" do
+    person = Person.select(:id).first
+    refute person.changed?
+
+    person.first_name = "Sean"
+    assert person.changed?
+
+    person.first_name = nil
+    assert person.changed?
   end
 
   private

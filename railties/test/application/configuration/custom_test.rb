@@ -5,7 +5,6 @@ module ApplicationTests
     class CustomTest < ActiveSupport::TestCase
       def setup
         build_app
-        boot_rails
         FileUtils.rm_rf("#{app_path}/config/environments")
       end
 
@@ -31,6 +30,13 @@ module ApplicationTests
         assert_equal false, x.hyper_debugger
         assert_equal nil, x.nil_debugger
         assert_nil x.i_do_not_exist.zomg
+      end
+
+      test 'custom configuration responds to all messages' do
+        x = Rails.configuration.x
+        assert_equal true, x.respond_to?(:i_do_not_exist)
+        assert_kind_of Method, x.method(:i_do_not_exist)
+        assert_kind_of ActiveSupport::OrderedOptions, x.i_do_not_exist
       end
 
       private

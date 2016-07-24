@@ -1,4 +1,3 @@
-require File.expand_path('../../../load_paths', __FILE__)
 require 'active_support/core_ext/kernel/reporting'
 
 # These are the normal settings that will be set up by Railties
@@ -6,6 +5,12 @@ require 'active_support/core_ext/kernel/reporting'
 silence_warnings do
   Encoding.default_internal = "UTF-8"
   Encoding.default_external = "UTF-8"
+end
+
+module Rails
+  def self.root
+    File.expand_path('../', File.dirname(__FILE__))
+  end
 end
 
 require 'active_support/testing/autorun'
@@ -25,12 +30,6 @@ I18n.enforce_available_locales = false
 
 FIXTURE_LOAD_PATH = File.expand_path('fixtures', File.dirname(__FILE__))
 ActionMailer::Base.view_paths = FIXTURE_LOAD_PATH
-
-module Rails
-  def self.root
-    File.expand_path('../', File.dirname(__FILE__))
-  end
-end
 
 # Skips the current run on Rubinius using Minitest::Assertions#skip
 def rubinius_skip(message = '')

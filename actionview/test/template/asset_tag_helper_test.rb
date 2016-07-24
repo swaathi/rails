@@ -27,6 +27,8 @@ class AssetTagHelperTest < ActionView::TestCase
   end
 
   AssetPathToTag = {
+    %(asset_path(""))             => %(),
+    %(asset_path("   "))          => %(),
     %(asset_path("foo"))          => %(/foo),
     %(asset_path("style.css"))    => %(/style.css),
     %(asset_path("xmlhr.js"))     => %(/xmlhr.js),
@@ -97,6 +99,7 @@ class AssetTagHelperTest < ActionView::TestCase
     %(javascript_include_tag("bank")) => %(<script src="/javascripts/bank.js" ></script>),
     %(javascript_include_tag("bank.js")) => %(<script src="/javascripts/bank.js" ></script>),
     %(javascript_include_tag("bank", :lang => "vbscript")) => %(<script lang="vbscript" src="/javascripts/bank.js" ></script>),
+    %(javascript_include_tag("bank", :host => "assets.example.com")) => %(<script src="http://assets.example.com/javascripts/bank.js"></script>),
 
     %(javascript_include_tag("http://example.com/all")) => %(<script src="http://example.com/all"></script>),
     %(javascript_include_tag("http://example.com/all.js")) => %(<script src="http://example.com/all.js"></script>),
@@ -141,6 +144,7 @@ class AssetTagHelperTest < ActionView::TestCase
     %(stylesheet_link_tag("/elsewhere/file")) => %(<link href="/elsewhere/file.css" media="screen" rel="stylesheet" />),
     %(stylesheet_link_tag("subdir/subdir")) => %(<link href="/stylesheets/subdir/subdir.css" media="screen" rel="stylesheet" />),
     %(stylesheet_link_tag("bank", :media => "all")) => %(<link href="/stylesheets/bank.css" media="all" rel="stylesheet" />),
+    %(stylesheet_link_tag("bank", :host => "assets.example.com")) => %(<link href="http://assets.example.com/stylesheets/bank.css" media="screen" rel="stylesheet" />),
 
     %(stylesheet_link_tag("http://www.example.com/styles/style")) => %(<link href="http://www.example.com/styles/style" media="screen" rel="stylesheet" />),
     %(stylesheet_link_tag("http://www.example.com/styles/style.css")) => %(<link href="http://www.example.com/styles/style.css" media="screen" rel="stylesheet" />),
@@ -191,7 +195,8 @@ class AssetTagHelperTest < ActionView::TestCase
     %(image_tag("//www.rubyonrails.com/images/rails.png")) => %(<img alt="Rails" src="//www.rubyonrails.com/images/rails.png" />),
     %(image_tag("mouse.png", :alt => nil)) => %(<img src="/images/mouse.png" />),
     %(image_tag("data:image/gif;base64,R0lGODlhAQABAID/AMDAwAAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==", :alt => nil)) => %(<img src="data:image/gif;base64,R0lGODlhAQABAID/AMDAwAAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" />),
-    %(image_tag("")) => %(<img src="" />)
+    %(image_tag("")) => %(<img src="" />),
+    %(image_tag("gold.png", data: { title: 'Rails Application' })) => %(<img data-title="Rails Application" src="/images/gold.png" alt="Gold" />)
   }
 
   FaviconLinkToTag = {
@@ -233,7 +238,7 @@ class AssetTagHelperTest < ActionView::TestCase
   VideoLinkToTag = {
     %(video_tag("xml.ogg")) => %(<video src="/videos/xml.ogg"></video>),
     %(video_tag("rss.m4v", :autoplay => true, :controls => true)) => %(<video autoplay="autoplay" controls="controls" src="/videos/rss.m4v"></video>),
-    %(video_tag("rss.m4v", :autobuffer => true)) => %(<video autobuffer="autobuffer" src="/videos/rss.m4v"></video>),
+    %(video_tag("rss.m4v", :preload => 'none')) => %(<video preload="none" src="/videos/rss.m4v"></video>),
     %(video_tag("gold.m4v", :size => "160x120")) => %(<video height="120" src="/videos/gold.m4v" width="160"></video>),
     %(video_tag("gold.m4v", "size" => "320x240")) => %(<video height="240" src="/videos/gold.m4v" width="320"></video>),
     %(video_tag("trailer.ogg", :poster => "screenshot.png")) => %(<video poster="/images/screenshot.png" src="/videos/trailer.ogg"></video>),
@@ -283,7 +288,7 @@ class AssetTagHelperTest < ActionView::TestCase
     %(audio_tag("//media.rubyonrails.org/audio/rails_blog_2.mov")) => %(<audio src="//media.rubyonrails.org/audio/rails_blog_2.mov"></audio>),
     %(audio_tag("audio.mp3", "audio.ogg")) => %(<audio><source src="/audios/audio.mp3" /><source src="/audios/audio.ogg" /></audio>),
     %(audio_tag(["audio.mp3", "audio.ogg"])) => %(<audio><source src="/audios/audio.mp3" /><source src="/audios/audio.ogg" /></audio>),
-    %(audio_tag(["audio.mp3", "audio.ogg"], :autobuffer => true, :controls => true)) => %(<audio autobuffer="autobuffer" controls="controls"><source src="/audios/audio.mp3" /><source src="/audios/audio.ogg" /></audio>)
+    %(audio_tag(["audio.mp3", "audio.ogg"], :preload => 'none', :controls => true)) => %(<audio preload="none" controls="controls"><source src="/audios/audio.mp3" /><source src="/audios/audio.ogg" /></audio>)
   }
 
   FontPathToTag = {
@@ -454,6 +459,7 @@ class AssetTagHelperTest < ActionView::TestCase
     [nil, '/', '/foo/bar/', 'foo/bar/'].each do |prefix|
       assert_equal 'Rails', image_alt("#{prefix}rails.png")
       assert_equal 'Rails', image_alt("#{prefix}rails-9c0a079bdd7701d7e729bd956823d153.png")
+      assert_equal 'Rails', image_alt("#{prefix}rails-f56ef62bc41b040664e801a38f068082a75d506d9048307e8096737463503d0b.png")
       assert_equal 'Long file name with hyphens', image_alt("#{prefix}long-file-name-with-hyphens.png")
       assert_equal 'Long file name with underscores', image_alt("#{prefix}long_file_name_with_underscores.png")
     end

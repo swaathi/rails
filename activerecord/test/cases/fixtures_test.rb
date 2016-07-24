@@ -184,7 +184,6 @@ class FixturesTest < ActiveRecord::TestCase
   end
 
   def test_fixtures_from_root_yml_with_instantiation
-    # assert_equal 2, @accounts.size
     assert_equal 50, @unknown.credit_limit
   end
 
@@ -222,6 +221,10 @@ class FixturesTest < ActiveRecord::TestCase
       ActiveRecord::FixtureSet.create_fixtures(FIXTURES_ROOT + "/naked/yml", "parrots")
     end
     assert_equal(%(table "parrots" has no column named "arrr".), e.message)
+  end
+
+  def test_yaml_file_with_symbol_columns
+    ActiveRecord::FixtureSet.create_fixtures(FIXTURES_ROOT + "/naked/yml", "trees")
   end
 
   def test_omap_fixtures
@@ -619,6 +622,46 @@ class TransactionalFixturesOnCustomConnectionTest < ActiveRecord::TestCase
   end
 end
 
+class TransactionalFixturesOnConnectionNotification < ActiveRecord::TestCase
+  self.use_transactional_tests = true
+  self.use_instantiated_fixtures = false
+
+  def test_transaction_created_on_connection_notification
+    connection = stub(:transaction_open? => false)
+    connection.expects(:begin_transaction).with(joinable: false)
+    fire_connection_notification(connection)
+  end
+
+  def test_notification_established_transactions_are_rolled_back
+    # Mocha is not thread-safe so define our own stub to test
+    connection = Class.new do
+      attr_accessor :rollback_transaction_called
+      def transaction_open?; true; end
+      def begin_transaction(*args); end
+      def rollback_transaction(*args)
+        @rollback_transaction_called = true
+      end
+    end.new
+    fire_connection_notification(connection)
+    teardown_fixtures
+    assert(connection.rollback_transaction_called, "Expected <mock connection>#rollback_transaction to be called but was not")
+  end
+
+  private
+
+    def fire_connection_notification(connection)
+      ActiveRecord::Base.connection_handler.stubs(:retrieve_connection).with('book').returns(connection)
+      message_bus = ActiveSupport::Notifications.instrumenter
+      payload = {
+        spec_name: 'book',
+        config: nil,
+        connection_id: connection.object_id
+      }
+
+      message_bus.instrument('!connection.active_record', payload) {}
+    end
+end
+
 class InvalidTableNameFixturesTest < ActiveRecord::TestCase
   fixtures :funny_jokes
   # Set to false to blow away fixtures cache and ensure our fixtures are loaded
@@ -854,7 +897,7 @@ class FoxyFixturesTest < ActiveRecord::TestCase
     assert_equal("X marks the spot!", pirates(:mark).catchphrase)
   end
 
-  def test_supports_label_interpolation_for_fixnum_label
+  def test_supports_label_interpolation_for_integer_label
     assert_equal("#1 pirate!", pirates(1).catchphrase)
   end
 
@@ -953,5 +996,19 @@ class FixturesWithAbstractBelongsTo < ActiveRecord::TestCase
   test "creates fixtures with belongs_to associations defined in abstract base classes" do
     assert_not_nil doubloons(:blackbeards_doubloon)
     assert_equal pirates(:blackbeard), doubloons(:blackbeards_doubloon).pirate
+  end
+end
+
+class FixtureClassNamesTest < ActiveRecord::TestCase
+  def setup
+    @saved_cache = self.fixture_class_names.dup
+  end
+
+  def teardown
+    self.fixture_class_names.replace(@saved_cache)
+  end
+
+  test "fixture_class_names returns nil for unregistered identifier" do
+    assert_nil self.fixture_class_names['unregistered_identifier']
   end
 end

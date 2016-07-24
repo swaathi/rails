@@ -3,14 +3,18 @@ require 'uri'
 module ActiveRecord
   module ConnectionAdapters
     class ConnectionSpecification #:nodoc:
-      attr_reader :config, :adapter_method
+      attr_reader :name, :config, :adapter_method
 
-      def initialize(config, adapter_method)
-        @config, @adapter_method = config, adapter_method
+      def initialize(name, config, adapter_method)
+        @name, @config, @adapter_method = name, config, adapter_method
       end
 
       def initialize_dup(original)
         @config = original.config.dup
+      end
+
+      def to_hash
+        @config.merge(name: @name)
       end
 
       # Expands a connection string into a hash.
@@ -33,7 +37,7 @@ module ActiveRecord
         def initialize(url)
           raise "Database URL cannot be empty" if url.blank?
           @uri     = uri_parser.parse(url)
-          @adapter = @uri.scheme.tr('-', '_')
+          @adapter = @uri.scheme && @uri.scheme.tr('-', '_')
           @adapter = "postgresql" if @adapter == "postgres"
 
           if @uri.opaque
@@ -175,11 +179,16 @@ module ActiveRecord
           rescue Gem::LoadError => e
             raise Gem::LoadError, "Specified '#{spec[:adapter]}' for database adapter, but the gem is not loaded. Add `gem '#{e.name}'` to your Gemfile (and ensure its version is at the minimum required by ActiveRecord)."
           rescue LoadError => e
-            raise LoadError, "Could not load '#{path_to_adapter}'. Make sure that the adapter in config/database.yml is valid. If you use an adapter other than 'mysql', 'mysql2', 'postgresql' or 'sqlite3' add the necessary adapter gem to the Gemfile.", e.backtrace
+            raise LoadError, "Could not load '#{path_to_adapter}'. Make sure that the adapter in config/database.yml is valid. If you use an adapter other than 'mysql2', 'postgresql' or 'sqlite3' add the necessary adapter gem to the Gemfile.", e.backtrace
           end
 
           adapter_method = "#{spec[:adapter]}_connection"
-          ConnectionSpecification.new(spec, adapter_method)
+
+          unless ActiveRecord::Base.respond_to?(adapter_method)
+            raise AdapterNotFound, "database configuration specifies nonexistent #{spec.config[:adapter]} adapter"
+          end
+
+          ConnectionSpecification.new(spec.delete(:name) || "primary", spec, adapter_method)
         end
 
         private
@@ -224,7 +233,7 @@ module ActiveRecord
         #
         def resolve_symbol_connection(spec)
           if config = configurations[spec.to_s]
-            resolve_connection(config)
+            resolve_connection(config).merge("name" => spec.to_s)
           else
             raise(AdapterNotSpecified, "'#{spec}' database is not configured. Available: #{configurations.keys.inspect}")
           end

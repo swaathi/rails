@@ -22,7 +22,11 @@ module ActiveRecord
     end
 
     def arel_attribute(column_name)
-      arel_table[column_name]
+      if klass
+        klass.arel_attribute(column_name, arel_table)
+      else
+        arel_table[column_name]
+      end
     end
 
     def type(column_name)
@@ -40,7 +44,8 @@ module ActiveRecord
     def associated_table(table_name)
       return self if table_name == arel_table.name
 
-      association = klass._reflect_on_association(table_name)
+      association = klass._reflect_on_association(table_name) || klass._reflect_on_association(table_name.singularize)
+
       if association && !association.polymorphic?
         association_klass = association.klass
         arel_table = association_klass.arel_table.alias(table_name)

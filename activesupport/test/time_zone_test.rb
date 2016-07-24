@@ -388,11 +388,29 @@ class TimeZoneTest < ActiveSupport::TestCase
     end
   end
 
+  def test_strptime_with_malformed_string
+    with_env_tz 'US/Eastern' do
+      zone = ActiveSupport::TimeZone['Eastern Time (US & Canada)']
+      assert_raise(ArgumentError) { zone.strptime('1999-12-31', '%Y/%m/%d') }
+    end
+  end
+
   def test_utc_offset_lazy_loaded_from_tzinfo_when_not_passed_in_to_initialize
     tzinfo = TZInfo::Timezone.get('America/New_York')
     zone = ActiveSupport::TimeZone.create(tzinfo.name, nil, tzinfo)
     assert_equal nil, zone.instance_variable_get('@utc_offset')
     assert_equal(-18_000, zone.utc_offset)
+  end
+
+  def test_utc_offset_is_not_cached_when_current_period_gets_stale
+    tz = ActiveSupport::TimeZone.create('Moscow')
+    travel_to(Time.utc(2014, 10, 25, 21)) do # 1 hour before TZ change
+      assert_equal 14400, tz.utc_offset, 'utc_offset should be initialized according to current_period'
+    end
+
+    travel_to(Time.utc(2014, 10, 25, 22)) do # after TZ change
+      assert_equal 10800, tz.utc_offset, 'utc_offset should not be cached when current_period gets stale'
+    end
   end
 
   def test_seconds_to_utc_offset_with_colon
@@ -489,6 +507,11 @@ class TimeZoneTest < ActiveSupport::TestCase
   def test_us_zones
     assert ActiveSupport::TimeZone.us_zones.include?(ActiveSupport::TimeZone["Hawaii"])
     assert !ActiveSupport::TimeZone.us_zones.include?(ActiveSupport::TimeZone["Kuala Lumpur"])
+  end
+
+  def test_country_zones
+    assert ActiveSupport::TimeZone.country_zones("ru").include?(ActiveSupport::TimeZone["Moscow"])
+    assert !ActiveSupport::TimeZone.country_zones(:ru).include?(ActiveSupport::TimeZone["Kuala Lumpur"])
   end
 
   def test_to_yaml

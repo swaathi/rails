@@ -8,12 +8,12 @@ classes. Active Model allows for Action Pack helpers to interact with
 plain Ruby objects. Active Model also helps build custom ORMs for use
 outside of the Rails framework.
 
-After reading this guide, you will know: 
+After reading this guide, you will know:
 
 * How an Active Record model behaves.
-* How Callbacks and validations work. 
+* How Callbacks and validations work.
 * How serializers work.
-* The Rails internationalization (i18n) framework.
+* How Active Model integrates with the Rails internationalization (i18n) framework.
 
 --------------------------------------------------------------------------------
 
@@ -319,7 +319,7 @@ person.serializable_hash   # => {"name"=>"Bob"}
 
 #### ActiveModel::Serializers
 
-Rails provides a `ActiveModel::Serializers::JSON` serializer.
+Rails provides an `ActiveModel::Serializers::JSON` serializer.
 This module automatically include the `ActiveModel::Serialization`.
 
 ##### ActiveModel::Serializers::JSON
@@ -428,14 +428,14 @@ the Active Model API.
     class PersonTest < ActiveSupport::TestCase
       include ActiveModel::Lint::Tests
 
-      def setup
+      setup do
         @model = Person.new
       end
     end
     ```
 
 ```bash
-$ rake test
+$ rails test
 
 Run options: --seed 14596
 

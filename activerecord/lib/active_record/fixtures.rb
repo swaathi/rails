@@ -66,7 +66,7 @@ module ActiveRecord
   # By default, +test_helper.rb+ will load all of your fixtures into your test
   # database, so this test will succeed.
   #
-  # The testing environment will automatically load the all fixtures into the database before each
+  # The testing environment will automatically load all the fixtures into the database before each
   # test. To ensure consistent data, the environment deletes the fixtures before running the load.
   #
   # In addition to being available in the database, the fixture's data may also be accessed by
@@ -401,7 +401,7 @@ module ActiveRecord
   # It's possible to set the fixture's model class directly in the YAML file.
   # This is helpful when fixtures are loaded outside tests and
   # +set_fixture_class+ is not available (e.g.
-  # when running <tt>rake db:fixtures:load</tt>).
+  # when running <tt>rails db:fixtures:load</tt>).
   #
   #   _fixture:
   #     model_class: User
@@ -875,9 +875,7 @@ module ActiveRecord
       self.pre_loaded_fixtures = false
       self.config = ActiveRecord::Base
 
-      self.fixture_class_names = Hash.new do |h, fixture_set_name|
-        h[fixture_set_name] = ActiveRecord::FixtureSet.default_fixture_model_name(fixture_set_name, self.config)
-      end
+      self.fixture_class_names = {}
 
       silence_warnings do
         define_singleton_method :use_transactional_tests do
@@ -970,6 +968,7 @@ module ActiveRecord
       @fixture_cache = {}
       @fixture_connections = []
       @@already_loaded_fixtures ||= {}
+      @connection_subscriber = nil
 
       # Load fixtures once and begin transaction.
       if run_in_transaction?
@@ -979,10 +978,31 @@ module ActiveRecord
           @loaded_fixtures = load_fixtures(config)
           @@already_loaded_fixtures[self.class] = @loaded_fixtures
         end
+
+        # Begin transactions for connections already established
         @fixture_connections = enlist_fixture_connections
         @fixture_connections.each do |connection|
           connection.begin_transaction joinable: false
         end
+
+        # When connections are established in the future, begin a transaction too
+        @connection_subscriber = ActiveSupport::Notifications.subscribe('!connection.active_record') do |_, _, _, _, payload|
+          spec_name = payload[:spec_name] if payload.key?(:spec_name)
+
+          if spec_name
+            begin
+              connection = ActiveRecord::Base.connection_handler.retrieve_connection(spec_name)
+            rescue ConnectionNotEstablished
+              connection = nil
+            end
+
+            if connection && !@fixture_connections.include?(connection)
+              connection.begin_transaction joinable: false
+              @fixture_connections << connection
+            end
+          end
+        end
+
       # Load fixtures for every test.
       else
         ActiveRecord::FixtureSet.reset_cache
@@ -997,6 +1017,7 @@ module ActiveRecord
     def teardown_fixtures
       # Rollback changes if a transaction is active.
       if run_in_transaction?
+        ActiveSupport::Notifications.unsubscribe(@connection_subscriber) if @connection_subscriber
         @fixture_connections.each do |connection|
           connection.rollback_transaction if connection.transaction_open?
         end

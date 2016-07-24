@@ -47,9 +47,10 @@ module ActiveModel
       include HelperMethods
 
       attr_accessor :validation_context
+      private :validation_context=
       define_callbacks :validate, scope: :name
 
-      class_attribute :_validators
+      class_attribute :_validators, instance_writer: false
       self._validators = Hash.new { |h,k| h[k] = [] }
     end
 
@@ -302,8 +303,6 @@ module ActiveModel
 
     # Runs all the specified validations and returns +true+ if no errors were
     # added otherwise +false+.
-    #
-    # Aliased as validate.
     #
     #   class Person
     #     include ActiveModel::Validations

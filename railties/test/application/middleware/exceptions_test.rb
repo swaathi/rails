@@ -8,7 +8,6 @@ module ApplicationTests
 
     def setup
       build_app
-      boot_rails
     end
 
     def teardown
@@ -48,7 +47,7 @@ module ApplicationTests
     test "uses custom exceptions app" do
       add_to_config <<-RUBY
         config.exceptions_app = lambda do |env|
-          [404, { "Content-Type" => "text/plain" }, ["YOU FAILED BRO"]]
+          [404, { "Content-Type" => "text/plain" }, ["YOU FAILED"]]
         end
       RUBY
 
@@ -56,7 +55,7 @@ module ApplicationTests
 
       get "/foo"
       assert_equal 404, last_response.status
-      assert_equal "YOU FAILED BRO", last_response.body
+      assert_equal "YOU FAILED", last_response.body
     end
 
     test "url generation error when action_dispatch.show_exceptions is set raises an exception" do
@@ -67,7 +66,7 @@ module ApplicationTests
           end
         end
       RUBY
-      
+
       app.config.action_dispatch.show_exceptions = true
 
       get '/foo'
@@ -85,7 +84,7 @@ module ApplicationTests
     test "unspecified route when action_dispatch.show_exceptions is set shows 404" do
       app.config.action_dispatch.show_exceptions = true
 
-      assert_nothing_raised(ActionController::RoutingError) do
+      assert_nothing_raised do
         get '/foo'
         assert_match "The page you were looking for doesn't exist.", last_response.body
       end
@@ -95,7 +94,7 @@ module ApplicationTests
       app.config.action_dispatch.show_exceptions = true
       app.config.consider_all_requests_local = true
 
-      assert_nothing_raised(ActionController::RoutingError) do
+      assert_nothing_raised do
         get '/foo'
         assert_match "No route matches", last_response.body
       end

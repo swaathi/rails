@@ -29,7 +29,7 @@ module ActiveRecord
     # instantiation of the actual post records.
     class CollectionProxy < Relation
       delegate(*(ActiveRecord::Calculations.public_instance_methods - [:count]), to: :scope)
-      delegate :find_nth, to: :scope
+      delegate :find_nth, :exists?, :update_all, :arel, to: :scope
 
       def initialize(klass, association) #:nodoc:
         @association = association
@@ -195,6 +195,16 @@ module ActiveRecord
       # Also known as accessing "the reddit".
       def forty_two(*args)
         @association.forty_two(*args)
+      end
+
+      # Same as #first except returns only the third-to-last record.
+      def third_to_last(*args)
+        @association.third_to_last(*args)
+      end
+
+      # Same as #first except returns only the second-to-last record.
+      def second_to_last(*args)
+        @association.second_to_last(*args)
       end
 
       # Returns the last record, or the last +n+ records, from the collection.
@@ -587,7 +597,7 @@ module ActiveRecord
       #   Pet.find(1)
       #   # => ActiveRecord::RecordNotFound: Couldn't find Pet with 'id'=1
       #
-      # You can pass +Fixnum+ or +String+ values, it finds the records
+      # You can pass +Integer+ or +String+ values, it finds the records
       # responding to the +id+ and executes delete on them.
       #
       #   class Person < ActiveRecord::Base
@@ -651,7 +661,7 @@ module ActiveRecord
       #
       #   Pet.find(1, 2, 3) # => ActiveRecord::RecordNotFound: Couldn't find all Pets with 'id': (1, 2, 3)
       #
-      # You can pass +Fixnum+ or +String+ values, it finds the records
+      # You can pass +Integer+ or +String+ values, it finds the records
       # responding to the +id+ and then deletes them from the database.
       #
       #   person.pets.size # => 3
@@ -705,12 +715,13 @@ module ActiveRecord
       end
       alias uniq distinct
 
-      # Count all records using SQL.
+      # Count all records.
       #
       #   class Person < ActiveRecord::Base
       #     has_many :pets
       #   end
       #
+      #   # This will perform the count using SQL.
       #   person.pets.count # => 3
       #   person.pets
       #   # => [
@@ -718,8 +729,13 @@ module ActiveRecord
       #   #       #<Pet id: 2, name: "Spook", person_id: 1>,
       #   #       #<Pet id: 3, name: "Choo-Choo", person_id: 1>
       #   #    ]
-      def count(column_name = nil)
-        @association.count(column_name)
+      #
+      # Passing a block will select all of a person's pets in SQL and then
+      # perform the count using Ruby.
+      #
+      #   person.pets.count { |pet| pet.name.include?('-') } # => 2
+      def count(column_name = nil, &block)
+        @association.count(column_name, &block)
       end
 
       # Returns the size of the collection. If the collection hasn't been loaded,
@@ -777,7 +793,7 @@ module ActiveRecord
       # Returns +true+ if the collection is empty. If the collection has been
       # loaded it is equivalent
       # to <tt>collection.size.zero?</tt>. If the collection has not been loaded,
-      # it is equivalent to <tt>collection.exists?</tt>. If the collection has
+      # it is equivalent to <tt>!collection.exists?</tt>. If the collection has
       # not already been loaded and you are going to fetch the records anyway it
       # is better to check <tt>collection.length.zero?</tt>.
       #
@@ -881,10 +897,6 @@ module ActiveRecord
         !!@association.include?(record)
       end
 
-      def arel #:nodoc:
-        scope.arel
-      end
-
       def proxy_association
         @association
       end
@@ -968,6 +980,10 @@ module ActiveRecord
         load_target.dup
       end
       alias_method :to_a, :to_ary
+
+      def records # :nodoc:
+        load_target
+      end
 
       # Adds one or more +records+ to the collection by setting their foreign keys
       # to the association's primary key. Returns +self+, so several appends may be

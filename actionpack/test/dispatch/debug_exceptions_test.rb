@@ -27,43 +27,47 @@ class DebugExceptionsTest < ActionDispatch::IntegrationTest
       env['action_dispatch.show_detailed_exceptions'] = @detailed
       req = ActionDispatch::Request.new(env)
       case req.path
-      when "/pass"
+      when %r{/pass}
         [404, { "X-Cascade" => "pass" }, self]
-      when "/not_found"
+      when %r{/not_found}
         raise AbstractController::ActionNotFound
-      when "/runtime_error"
+      when %r{/runtime_error}
         raise RuntimeError
-      when "/method_not_allowed"
+      when %r{/method_not_allowed}
         raise ActionController::MethodNotAllowed
-      when "/unknown_http_method"
+      when %r{/unknown_http_method}
         raise ActionController::UnknownHttpMethod
-      when "/not_implemented"
+      when %r{/not_implemented}
         raise ActionController::NotImplemented
-      when "/unprocessable_entity"
+      when %r{/unprocessable_entity}
         raise ActionController::InvalidAuthenticityToken
-      when "/not_found_original_exception"
-        raise ActionView::Template::Error.new('template', AbstractController::ActionNotFound.new)
-      when "/missing_template"
+      when %r{/not_found_original_exception}
+        begin
+          raise AbstractController::ActionNotFound.new
+        rescue
+          raise ActionView::Template::Error.new('template')
+        end
+      when %r{/missing_template}
         raise ActionView::MissingTemplate.new(%w(foo), 'foo/index', %w(foo), false, 'mailer')
-      when "/bad_request"
+      when %r{/bad_request}
         raise ActionController::BadRequest
-      when "/missing_keys"
+      when %r{/missing_keys}
         raise ActionController::UrlGenerationError, "No route matches"
-      when "/parameter_missing"
+      when %r{/parameter_missing}
         raise ActionController::ParameterMissing, :missing_param_key
-      when "/original_syntax_error"
+      when %r{/original_syntax_error}
         eval 'broke_syntax =' # `eval` need for raise native SyntaxError at runtime
-      when "/syntax_error_into_view"
+      when %r{/syntax_error_into_view}
         begin
           eval 'broke_syntax ='
-        rescue Exception => e
+        rescue Exception
           template = ActionView::Template.new(File.read(__FILE__),
                                               __FILE__,
                                               ActionView::Template::Handlers::Raw.new,
                                               {})
-          raise ActionView::Template::Error.new(template, e)
+          raise ActionView::Template::Error.new(template)
         end
-      when "/framework_raises"
+      when %r{/framework_raises}
         method_that_raises
       else
         raise "puke!"
@@ -162,6 +166,14 @@ class DebugExceptionsTest < ActionDispatch::IntegrationTest
     assert_equal "text/plain", response.content_type
     assert_match(/RuntimeError\npuke/, body)
 
+    Rails.stub :root, Pathname.new('.') do
+      get "/", headers: xhr_request_env
+
+      assert_response 500
+      assert_match 'Extracted source (around line #', body
+      assert_select 'pre', { count: 0 }, body
+    end
+
     get "/not_found", headers: xhr_request_env
     assert_response 404
     assert_no_match(/<body>/, body)
@@ -191,6 +203,86 @@ class DebugExceptionsTest < ActionDispatch::IntegrationTest
     assert_no_match(/<body>/, body)
     assert_equal "text/plain", response.content_type
     assert_match(/ActionController::ParameterMissing/, body)
+  end
+
+  test "rescue with JSON error for JSON API request" do
+    @app = ActionDispatch::DebugExceptions.new(Boomer.new(true), RoutesApp, :api)
+
+    get "/", headers: { 'action_dispatch.show_exceptions' => true }, as: :json
+    assert_response 500
+    assert_no_match(/<header>/, body)
+    assert_no_match(/<body>/, body)
+    assert_equal "application/json", response.content_type
+    assert_match(/RuntimeError: puke/, body)
+
+    get "/not_found", headers: { 'action_dispatch.show_exceptions' => true }, as: :json
+    assert_response 404
+    assert_no_match(/<body>/, body)
+    assert_equal "application/json", response.content_type
+    assert_match(/#{AbstractController::ActionNotFound.name}/, body)
+
+    get "/method_not_allowed", headers: { 'action_dispatch.show_exceptions' => true }, as: :json
+    assert_response 405
+    assert_no_match(/<body>/, body)
+    assert_equal "application/json", response.content_type
+    assert_match(/ActionController::MethodNotAllowed/, body)
+
+    get "/unknown_http_method", headers: { 'action_dispatch.show_exceptions' => true }, as: :json
+    assert_response 405
+    assert_no_match(/<body>/, body)
+    assert_equal "application/json", response.content_type
+    assert_match(/ActionController::UnknownHttpMethod/, body)
+
+    get "/bad_request", headers: { 'action_dispatch.show_exceptions' => true }, as: :json
+    assert_response 400
+    assert_no_match(/<body>/, body)
+    assert_equal "application/json", response.content_type
+    assert_match(/ActionController::BadRequest/, body)
+
+    get "/parameter_missing", headers: { 'action_dispatch.show_exceptions' => true }, as: :json
+    assert_response 400
+    assert_no_match(/<body>/, body)
+    assert_equal "application/json", response.content_type
+    assert_match(/ActionController::ParameterMissing/, body)
+  end
+
+  test "rescue with HTML format for HTML API request" do
+    @app = ActionDispatch::DebugExceptions.new(Boomer.new(true), RoutesApp, :api)
+
+    get "/index.html", headers: { 'action_dispatch.show_exceptions' => true }
+    assert_response 500
+    assert_match(/<header>/, body)
+    assert_match(/<body>/, body)
+    assert_equal "text/html", response.content_type
+    assert_match(/puke/, body)
+  end
+
+  test "rescue with XML format for XML API requests" do
+    @app = ActionDispatch::DebugExceptions.new(Boomer.new(true), RoutesApp, :api)
+
+    get "/index.xml", headers: { 'action_dispatch.show_exceptions' => true }
+    assert_response 500
+    assert_equal "application/xml", response.content_type
+    assert_match(/RuntimeError: puke/, body)
+  end
+
+  test "rescue with JSON format as fallback if API request format is not supported" do
+    begin
+      Mime::Type.register 'text/wibble', :wibble
+
+      ActionDispatch::IntegrationTest.register_encoder(:wibble,
+        param_encoder: -> params { params })
+
+      @app = ActionDispatch::DebugExceptions.new(Boomer.new(true), RoutesApp, :api)
+
+      get "/index", headers: { 'action_dispatch.show_exceptions' => true }, as: :wibble
+      assert_response 500
+      assert_equal "application/json", response.content_type
+      assert_match(/RuntimeError: puke/, body)
+
+    ensure
+      Mime::Type.unregister :wibble
+    end
   end
 
   test "does not show filtered parameters" do
@@ -268,6 +360,29 @@ class DebugExceptionsTest < ActionDispatch::IntegrationTest
     output = StringIO.new
     get "/", headers: { 'action_dispatch.show_exceptions' => true, 'action_dispatch.logger' => Logger.new(output) }
     assert_match(/puke/, output.rewind && output.read)
+  end
+
+  test 'logs only what is necessary' do
+    @app = DevelopmentApp
+    io = StringIO.new
+    logger = ActiveSupport::Logger.new(io)
+
+    _old, ActionView::Base.logger = ActionView::Base.logger, logger
+    begin
+      get "/", headers: { 'action_dispatch.show_exceptions' => true, 'action_dispatch.logger' => logger }
+    ensure
+      ActionView::Base.logger = _old
+    end
+
+    output = io.rewind && io.read
+    lines = output.lines
+
+    # Other than the first three...
+    assert_equal(["  \n", "RuntimeError (puke!):\n", "  \n"], lines.slice!(0, 3))
+    lines.each do |line|
+      # .. all the remaining lines should be from the backtrace
+      assert_match(/:\d+:in /, line)
+    end
   end
 
   test 'uses backtrace cleaner from env' do
@@ -360,7 +475,7 @@ class DebugExceptionsTest < ActionDispatch::IntegrationTest
         assert_select 'pre code a:first', %r{test/dispatch/debug_exceptions_test\.rb:\d+:in `call}
       end
 
-      # assert framework trace that that threw the error is first
+      # assert framework trace that threw the error is first
       assert_select '#Framework-Trace' do
         assert_select 'pre code a:first', /method_that_raises/
       end

@@ -40,7 +40,23 @@ class Time
       Thread.current[:time_zone] = find_zone!(time_zone)
     end
 
-    # Allows override of <tt>Time.zone</tt> locally inside supplied block; resets <tt>Time.zone</tt> to existing value when done.
+    # Allows override of <tt>Time.zone</tt> locally inside supplied block;
+    # resets <tt>Time.zone</tt> to existing value when done.
+    #
+    #   class ApplicationController < ActionController::Base
+    #     around_action :set_time_zone
+    #
+    #     private
+    #
+    #     def set_time_zone
+    #       Time.use_zone(current_user.timezone) { yield }
+    #     end
+    #   end
+    #
+    #  NOTE: This won't affect any <tt>ActiveSupport::TimeWithZone</tt>
+    #  objects that have already been created, e.g. any model timestamp
+    #  attributes that have been read before the block will remain in
+    #  the application's default timezone.
     def use_zone(time_zone)
       new_zone = find_zone!(time_zone)
       begin
@@ -90,6 +106,25 @@ class Time
     #   Time.find_zone "NOT-A-TIMEZONE"   # => nil
     def find_zone(time_zone)
       find_zone!(time_zone) rescue nil
+    end
+
+    # Returns an offset time when provided with an offset value.
+    # Accepts offset values of format,
+  	# (+|-)(0-1)(1-12):(0-5)(0-9)
+    # Returns the same time for invalid offset values.
+    #
+  	# Example,
+  	# t = Time.now.utc
+  	# => Fri, 23 Jul 2016 07:56:38 UTC +00:00
+  	# t.offset("+05:30")
+  	# => Fri, 23 Jul 2016 13:26:38 UTC +00:00
+    def offset(offset_value)
+      if match = offset_value.match(/^(?:Z|([+-])((?:2[0-3]|[01][0-9])):([0-5][0-9]))$/)
+          set, hour, minute = match.captures
+        return self.send(set, hour.to_i.hour).send(set, minute.to_i.minute)
+      else
+        return self
+      end
     end
   end
 end

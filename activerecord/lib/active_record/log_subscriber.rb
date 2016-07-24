@@ -20,14 +20,14 @@ module ActiveRecord
       @odd = false
     end
 
-    def render_bind(attribute)
-      value = if attribute.type.binary? && attribute.value
-        "<#{attribute.value.bytesize} bytes of binary data>"
+    def render_bind(attr, type_casted_value)
+      value = if attr.type.binary? && attr.value
+        "<#{attr.value_for_database.to_s.bytesize} bytes of binary data>"
       else
-        attribute.value_for_database
+        type_casted_value
       end
 
-      [attribute.name, value]
+      [attr.name, value]
     end
 
     def sql(event)
@@ -44,7 +44,9 @@ module ActiveRecord
       binds = nil
 
       unless (payload[:binds] || []).empty?
-        binds = "  " + payload[:binds].map { |attr| render_bind(attr) }.inspect
+        binds = "  " + payload[:binds].zip(payload[:type_casted_binds]).map { |attr, value|
+          render_bind(attr, value)
+        }.inspect
       end
 
       name = colorize_payload_name(name, payload[:name])
@@ -67,7 +69,7 @@ module ActiveRecord
       case sql
         when /\A\s*rollback/mi
           RED
-        when /\s*.*?select .*for update/mi, /\A\s*lock/mi
+        when /select .*for update/mi, /\A\s*lock/mi
           WHITE
         when /\A\s*select/i
           BLUE

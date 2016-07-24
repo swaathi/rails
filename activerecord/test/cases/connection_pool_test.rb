@@ -1,5 +1,5 @@
 require "cases/helper"
-require 'concurrent/atomics'
+require 'concurrent/atomic/count_down_latch'
 
 module ActiveRecord
   module ConnectionAdapters
@@ -151,7 +151,7 @@ module ActiveRecord
 
         assert_equal 1, active_connections(@pool).size
       ensure
-        @pool.connections.each(&:close)
+        @pool.connections.each { |conn| conn.close if conn.in_use? }
       end
 
       def test_remove_connection
@@ -335,11 +335,22 @@ module ActiveRecord
       # is called with an anonymous class
       def test_anonymous_class_exception
         anonymous = Class.new(ActiveRecord::Base)
-        handler = ActiveRecord::Base.connection_handler
 
-        assert_raises(RuntimeError) {
-          handler.establish_connection anonymous, nil
-        }
+        assert_raises(RuntimeError) do
+          anonymous.establish_connection
+        end
+      end
+
+      def test_connection_notification_is_called
+        payloads = []
+        subscription = ActiveSupport::Notifications.subscribe('!connection.active_record') do |name, started, finished, unique_id, payload|
+          payloads << payload
+        end
+        ActiveRecord::Base.establish_connection :arunit
+        assert_equal [:config, :connection_id, :spec_name], payloads[0].keys.sort
+        assert_equal 'primary', payloads[0][:spec_name]
+      ensure
+        ActiveSupport::Notifications.unsubscribe(subscription) if subscription
       end
 
       def test_pool_sets_connection_schema_cache
@@ -433,6 +444,9 @@ module ActiveRecord
             Thread.new { @pool.send(group_action_method) }.join
             # assert connection has been forcefully taken away from us
             assert_not @pool.active_connection?
+
+            # make a new connection for with_connection to clean up
+            @pool.connection
           end
         end
       end

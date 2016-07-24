@@ -10,11 +10,25 @@ module ActionDispatch
     # Raised when raw data from the request cannot be parsed by the parser
     # defined for request's content mime type.
     class ParseError < StandardError
-      attr_reader :original_exception
 
-      def initialize(message, original_exception)
-        super(message)
-        @original_exception = original_exception
+      def initialize(message = nil, original_exception = nil)
+        if message
+          ActiveSupport::Deprecation.warn("Passing #message is deprecated and has no effect. " \
+                                          "#{self.class} will automatically capture the message " \
+                                          "of the original exception.", caller)
+        end
+
+        if original_exception
+          ActiveSupport::Deprecation.warn("Passing #original_exception is deprecated and has no effect. " \
+                                          "Exceptions will automatically capture the original exception.", caller)
+        end
+
+        super($!.message)
+      end
+
+      def original_exception
+        ActiveSupport::Deprecation.warn("#original_exception is deprecated. Use #cause instead.", caller)
+        cause
       end
     end
 
@@ -23,6 +37,8 @@ module ActionDispatch
     # The +parsers+ argument can take Hash of parsers where key is identifying
     # content mime type, and value is a lambda that is going to process data.
     def self.new(app, parsers = {})
+      ActiveSupport::Deprecation.warn('ActionDispatch::ParamsParser is deprecated and will be removed in Rails 5.1. Configure the parameter parsing in ActionDispatch::Request.parameter_parsers.')
+      parsers = parsers.transform_keys { |key| key.respond_to?(:symbol) ? key.symbol : key }
       ActionDispatch::Request.parameter_parsers = ActionDispatch::Request::DEFAULT_PARSERS.merge(parsers)
       app
     end

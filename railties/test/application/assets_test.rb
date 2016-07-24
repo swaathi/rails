@@ -9,7 +9,6 @@ module ApplicationTests
 
     def setup
       build_app(initializers: true)
-      boot_rails
     end
 
     def teardown
@@ -19,7 +18,7 @@ module ApplicationTests
     def precompile!(env = nil)
       with_env env.to_h do
         quietly do
-          precompile_task = "bin/rake assets:precompile --trace 2>&1"
+          precompile_task = "bin/rails assets:precompile --trace 2>&1"
           output = Dir.chdir(app_path) { %x[ #{precompile_task} ] }
           assert $?.success?, output
           output
@@ -36,7 +35,7 @@ module ApplicationTests
 
     def clean_assets!
       quietly do
-        assert Dir.chdir(app_path) { system('bin/rake assets:clobber') }
+        assert Dir.chdir(app_path) { system('bin/rails assets:clobber') }
       end
     end
 
@@ -174,7 +173,7 @@ module ApplicationTests
 
       precompile!
 
-      assert_file_exists("#{app_path}/public/assets/something-*.js")
+      assert_file_exists("#{app_path}/public/assets/something/index-*.js")
     end
 
     test 'precompile use assets defined in app env config' do
@@ -184,6 +183,26 @@ module ApplicationTests
       precompile! RAILS_ENV: 'production'
 
       assert_file_exists("#{app_path}/public/assets/something-*.js")
+    end
+
+    test 'sprockets cache is not shared between environments' do
+      app_file "app/assets/images/rails.png", "notactuallyapng"
+      app_file "app/assets/stylesheets/application.css.erb", "body { background: '<%= asset_path('rails.png') %>'; }"
+      add_to_env_config 'production', 'config.assets.prefix = "production_assets"'
+
+      precompile!
+
+      assert_file_exists("#{app_path}/public/assets/application-*.css")
+
+      file = Dir["#{app_path}/public/assets/application-*.css"].first
+      assert_match(/assets\/rails-([0-z]+)\.png/, File.read(file))
+
+      precompile! RAILS_ENV: 'production'
+
+      assert_file_exists("#{app_path}/public/production_assets/application-*.css")
+
+      file = Dir["#{app_path}/public/production_assets/application-*.css"].first
+      assert_match(/production_assets\/rails-([0-z]+)\.png/, File.read(file))
     end
 
     test 'precompile use assets defined in app config and reassigned in app env config' do
@@ -240,7 +259,7 @@ module ApplicationTests
 
     test "assets do not require any assets group gem when manifest file is present" do
       app_file "app/assets/javascripts/application.js", "alert();"
-      add_to_env_config "production", "config.serve_static_files = true"
+      add_to_env_config "production", "config.public_file_server.enabled = true"
 
       precompile! RAILS_ENV: 'production'
 
@@ -287,7 +306,7 @@ module ApplicationTests
       assert_not_equal asset_path, assets["assets"]["application.css"]
     end
 
-    test "precompile appends the md5 hash to files referenced with asset_path and run in production with digest true" do
+    test "precompile appends the MD5 hash to files referenced with asset_path and run in production with digest true" do
       app_file "app/assets/images/rails.png", "notactuallyapng"
       app_file "app/assets/stylesheets/application.css.erb", "p { background-image: url(<%= asset_path('rails.png') %>) }"
 
@@ -324,8 +343,7 @@ module ApplicationTests
 
       clean_assets!
 
-      files = Dir["#{app_path}/public/assets/**/*", "#{app_path}/tmp/cache/assets/development/*",
-                  "#{app_path}/tmp/cache/assets/test/*", "#{app_path}/tmp/cache/assets/production/*"]
+      files = Dir["#{app_path}/public/assets/**/*"]
       assert_equal 0, files.length, "Expected no assets, but found #{files.join(', ')}"
     end
 
@@ -410,7 +428,7 @@ module ApplicationTests
 
       precompile!
 
-      assert_equal "Post\n;\n", File.read(Dir["#{app_path}/public/assets/application-*.js"].first)
+      assert_match(/Post;/, File.read(Dir["#{app_path}/public/assets/application-*.js"].first))
     end
 
     test "initialization on the assets group should set assets_dir" do
@@ -458,9 +476,9 @@ module ApplicationTests
       class ::PostsController < ActionController::Base; end
 
       get '/posts', {}, {'HTTPS'=>'off'}
-      assert_match('src="http://example.com/assets/application.debug.js', last_response.body)
+      assert_match('src="http://example.com/assets/application.self.js', last_response.body)
       get '/posts', {}, {'HTTPS'=>'on'}
-      assert_match('src="https://example.com/assets/application.debug.js', last_response.body)
+      assert_match('src="https://example.com/assets/application.self.js', last_response.body)
     end
 
     test "asset urls should be protocol-relative if no request is in scope" do

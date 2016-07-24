@@ -3,14 +3,14 @@ module ActiveRecord
     # Abstract representation of an index definition on a table. Instances of
     # this type are typically created and returned by methods in database
     # adapters. e.g. ActiveRecord::ConnectionAdapters::AbstractMysqlAdapter#indexes
-    class IndexDefinition < Struct.new(:table, :name, :unique, :columns, :lengths, :orders, :where, :type, :using) #:nodoc:
+    class IndexDefinition < Struct.new(:table, :name, :unique, :columns, :lengths, :orders, :where, :type, :using, :comment) #:nodoc:
     end
 
     # Abstract representation of a column definition. Instances of this type
     # are typically created by methods in TableDefinition, and added to the
     # +columns+ attribute of said TableDefinition object, in order to be used
     # for generating a number of table creation or table changing SQL statements.
-    class ColumnDefinition < Struct.new(:name, :type, :limit, :precision, :scale, :default, :null, :first, :after, :auto_increment, :primary_key, :collation, :sql_type) #:nodoc:
+    class ColumnDefinition < Struct.new(:name, :type, :limit, :precision, :scale, :default, :null, :first, :after, :auto_increment, :primary_key, :collation, :sql_type, :comment) #:nodoc:
 
       def primary_key?
         primary_key || type.to_sym == :primary_key
@@ -51,11 +51,12 @@ module ActiveRecord
         options[:primary_key] != default_primary_key
       end
 
-      def defined_for?(options_or_to_table = {})
-        if options_or_to_table.is_a?(Hash)
-          options_or_to_table.all? {|key, value| options[key].to_s == value.to_s }
+      def defined_for?(to_table_ord = nil, to_table: nil, **options)
+        if to_table_ord
+          self.to_table == to_table_ord.to_s
         else
-          to_table == options_or_to_table.to_s
+          (to_table.nil? || to_table.to_s == self.to_table) &&
+            options.all? { |k, v| self.options[k].to_s == v.to_s }
         end
       end
 
@@ -69,7 +70,7 @@ module ActiveRecord
       def initialize(
         name,
         polymorphic: false,
-        index: false,
+        index: true,
         foreign_key: false,
         type: :integer,
         **options
@@ -182,6 +183,7 @@ module ActiveRecord
           end
         CODE
       end
+      alias_method :numeric, :decimal
     end
 
     # Represents the schema of an SQL table in an abstract way. This class
@@ -190,7 +192,7 @@ module ActiveRecord
     # Inside migration files, the +t+ object in {create_table}[rdoc-ref:SchemaStatements#create_table]
     # is actually of this type:
     #
-    #   class SomeMigration < ActiveRecord::Migration
+    #   class SomeMigration < ActiveRecord::Migration[5.0]
     #     def up
     #       create_table :foo do |t|
     #         puts t.class  # => "ActiveRecord::ConnectionAdapters::TableDefinition"
@@ -202,26 +204,22 @@ module ActiveRecord
     #     end
     #   end
     #
-    # The table definitions
-    # The Columns are stored as a ColumnDefinition in the #columns attribute.
     class TableDefinition
       include ColumnMethods
 
-      # An array of ColumnDefinition objects, representing the column changes
-      # that have been defined.
       attr_accessor :indexes
-      attr_reader :name, :temporary, :options, :as, :foreign_keys
+      attr_reader :name, :temporary, :options, :as, :foreign_keys, :comment
 
-      def initialize(types, name, temporary, options, as = nil)
+      def initialize(name, temporary = false, options = nil, as = nil, comment: nil)
         @columns_hash = {}
         @indexes = {}
-        @foreign_keys = {}
+        @foreign_keys = []
         @primary_keys = nil
-        @native = types
         @temporary = temporary
         @options = options
         @as = as
         @name = name
+        @comment = comment
       end
 
       def primary_keys(name = nil) # :nodoc:
@@ -238,86 +236,19 @@ module ActiveRecord
       end
 
       # Instantiates a new column for the table.
-      # The +type+ parameter is normally one of the migrations native types,
-      # which is one of the following:
-      # <tt>:primary_key</tt>, <tt>:string</tt>, <tt>:text</tt>,
-      # <tt>:integer</tt>, <tt>:bigint</tt>, <tt>:float</tt>, <tt>:decimal</tt>,
-      # <tt>:datetime</tt>, <tt>:time</tt>, <tt>:date</tt>,
-      # <tt>:binary</tt>, <tt>:boolean</tt>.
+      # See {connection.add_column}[rdoc-ref:ConnectionAdapters::SchemaStatements#add_column]
+      # for available options.
       #
-      # You may use a type not in this list as long as it is supported by your
-      # database (for example, "polygon" in MySQL), but this will not be database
-      # agnostic and should usually be avoided.
-      #
-      # Available options are (none of these exists by default):
-      # * <tt>:limit</tt> -
-      #   Requests a maximum column length. This is number of characters for a <tt>:string</tt> column
-      #   and number of bytes for <tt>:text</tt>, <tt>:binary</tt> and <tt>:integer</tt> columns.
-      # * <tt>:default</tt> -
-      #   The column's default value. Use nil for NULL.
-      # * <tt>:null</tt> -
-      #   Allows or disallows +NULL+ values in the column. This option could
-      #   have been named <tt>:null_allowed</tt>.
-      # * <tt>:precision</tt> -
-      #   Specifies the precision for a <tt>:decimal</tt> column.
-      # * <tt>:scale</tt> -
-      #   Specifies the scale for a <tt>:decimal</tt> column.
+      # Additional options are:
       # * <tt>:index</tt> -
       #   Create an index for the column. Can be either <tt>true</tt> or an options hash.
-      #
-      # Note: The precision is the total number of significant digits
-      # and the scale is the number of digits that can be stored following
-      # the decimal point. For example, the number 123.45 has a precision of 5
-      # and a scale of 2. A decimal with a precision of 5 and a scale of 2 can
-      # range from -999.99 to 999.99.
-      #
-      # Please be aware of different RDBMS implementations behavior with
-      # <tt>:decimal</tt> columns:
-      # * The SQL standard says the default scale should be 0, <tt>:scale</tt> <=
-      #   <tt>:precision</tt>, and makes no comments about the requirements of
-      #   <tt>:precision</tt>.
-      # * MySQL: <tt>:precision</tt> [1..63], <tt>:scale</tt> [0..30].
-      #   Default is (10,0).
-      # * PostgreSQL: <tt>:precision</tt> [1..infinity],
-      #   <tt>:scale</tt> [0..infinity]. No default.
-      # * SQLite2: Any <tt>:precision</tt> and <tt>:scale</tt> may be used.
-      #   Internal storage as strings. No default.
-      # * SQLite3: No restrictions on <tt>:precision</tt> and <tt>:scale</tt>,
-      #   but the maximum supported <tt>:precision</tt> is 16. No default.
-      # * Oracle: <tt>:precision</tt> [1..38], <tt>:scale</tt> [-84..127].
-      #   Default is (38,0).
-      # * DB2: <tt>:precision</tt> [1..63], <tt>:scale</tt> [0..62].
-      #   Default unknown.
-      # * SqlServer?: <tt>:precision</tt> [1..38], <tt>:scale</tt> [0..38].
-      #   Default (38,0).
       #
       # This method returns <tt>self</tt>.
       #
       # == Examples
+      #
       #  # Assuming +td+ is an instance of TableDefinition
-      #  td.column(:granted, :boolean)
-      #  # granted BOOLEAN
-      #
-      #  td.column(:picture, :binary, limit: 2.megabytes)
-      #  # => picture BLOB(2097152)
-      #
-      #  td.column(:sales_stage, :string, limit: 20, default: 'new', null: false)
-      #  # => sales_stage VARCHAR(20) DEFAULT 'new' NOT NULL
-      #
-      #  td.column(:bill_gates_money, :decimal, precision: 15, scale: 2)
-      #  # => bill_gates_money DECIMAL(15,2)
-      #
-      #  td.column(:sensor_reading, :decimal, precision: 30, scale: 20)
-      #  # => sensor_reading DECIMAL(30,20)
-      #
-      #  # While <tt>:scale</tt> defaults to zero on most databases, it
-      #  # probably wouldn't hurt to include it.
-      #  td.column(:huge_integer, :decimal, precision: 30)
-      #  # => huge_integer DECIMAL(30)
-      #
-      #  # Defines a column with a database-specific type.
-      #  td.column(:foo, 'polygon')
-      #  # => foo polygon
+      #  td.column(:granted, :boolean, index: true)
       #
       # == Short-hand examples
       #
@@ -401,7 +332,10 @@ module ActiveRecord
       end
 
       def foreign_key(table_name, options = {}) # :nodoc:
-        foreign_keys[table_name] = options
+        table_name_prefix = ActiveRecord::Base.table_name_prefix
+        table_name_suffix = ActiveRecord::Base.table_name_suffix
+        table_name = "#{table_name_prefix}#{table_name}#{table_name_suffix}"
+        foreign_keys.push([table_name, options])
       end
 
       # Appends <tt>:datetime</tt> columns <tt>:created_at</tt> and
@@ -433,11 +367,8 @@ module ActiveRecord
       def new_column_definition(name, type, options) # :nodoc:
         type = aliased_types(type.to_s, type)
         column = create_column_definition name, type
-        limit = options.fetch(:limit) do
-          native[type][:limit] if native[type].is_a?(Hash)
-        end
 
-        column.limit       = limit
+        column.limit       = options[:limit]
         column.precision   = options[:precision]
         column.scale       = options[:scale]
         column.default     = options[:default]
@@ -447,16 +378,13 @@ module ActiveRecord
         column.auto_increment = options[:auto_increment]
         column.primary_key = type == :primary_key || options[:primary_key]
         column.collation   = options[:collation]
+        column.comment     = options[:comment]
         column
       end
 
       private
       def create_column_definition(name, type)
         ColumnDefinition.new name, type
-      end
-
-      def native
-        @native
       end
 
       def aliased_types(name, fallback)
@@ -515,6 +443,7 @@ module ActiveRecord
     #     t.bigint
     #     t.float
     #     t.decimal
+    #     t.numeric
     #     t.datetime
     #     t.timestamp
     #     t.time
@@ -702,11 +631,6 @@ module ActiveRecord
       def foreign_key_exists?(*args) # :nodoc:
         @base.foreign_key_exists?(name, *args)
       end
-
-      private
-        def native
-          @base.native_database_types
-        end
     end
   end
 end

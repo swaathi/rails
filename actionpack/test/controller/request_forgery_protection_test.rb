@@ -128,6 +128,27 @@ class CustomAuthenticityParamController < RequestForgeryProtectionControllerUsin
   end
 end
 
+class PerFormTokensController < ActionController::Base
+  protect_from_forgery :with => :exception
+  self.per_form_csrf_tokens = true
+
+  def index
+    render inline: "<%= form_tag (params[:form_path] || '/per_form_tokens/post_one'), method: params[:form_method] %>"
+  end
+
+  def button_to
+    render inline: "<%= button_to 'Button', (params[:form_path] || '/per_form_tokens/post_one'), method: params[:form_method] %>"
+  end
+
+  def post_one
+    render plain: ''
+  end
+
+  def post_two
+    render plain: ''
+  end
+end
+
 # common test methods
 module RequestForgeryProtectionTests
   def setup
@@ -304,6 +325,41 @@ module RequestForgeryProtectionTests
     assert_not_blocked { put :index }
   end
 
+  def test_should_allow_post_with_origin_checking_and_correct_origin
+    forgery_protection_origin_check do
+      session[:_csrf_token] = @token
+      @controller.stub :form_authenticity_token, @token do
+        assert_not_blocked do
+          @request.set_header 'HTTP_ORIGIN', 'http://test.host'
+          post :index, params: { custom_authenticity_token: @token }
+        end
+      end
+    end
+  end
+
+  def test_should_allow_post_with_origin_checking_and_no_origin
+    forgery_protection_origin_check do
+      session[:_csrf_token] = @token
+      @controller.stub :form_authenticity_token, @token do
+        assert_not_blocked do
+          post :index, params: { custom_authenticity_token: @token }
+        end
+      end
+    end
+  end
+
+  def test_should_block_post_with_origin_checking_and_wrong_origin
+    forgery_protection_origin_check do
+      session[:_csrf_token] = @token
+      @controller.stub :form_authenticity_token, @token do
+        assert_blocked do
+          @request.set_header 'HTTP_ORIGIN', 'http://bad.host'
+          post :index, params: { custom_authenticity_token: @token }
+        end
+      end
+    end
+  end
+
   def test_should_warn_on_missing_csrf_token
     old_logger = ActionController::Base.logger
     logger = ActiveSupport::LogSubscriber::TestHelper::MockLogger.new
@@ -348,6 +404,37 @@ module RequestForgeryProtectionTests
     assert_cross_origin_not_blocked do
       @request.accept = 'text/javascript'
       get :negotiate_same_origin, xhr: true
+    end
+  end
+
+  def test_should_warn_on_not_same_origin_js
+    old_logger = ActionController::Base.logger
+    logger = ActiveSupport::LogSubscriber::TestHelper::MockLogger.new
+    ActionController::Base.logger = logger
+
+    begin
+      assert_cross_origin_blocked { get :same_origin_js }
+
+      assert_equal 1, logger.logged(:warn).size
+      assert_match(/<script> tag on another site requested protected JavaScript/, logger.logged(:warn).last)
+    ensure
+      ActionController::Base.logger = old_logger
+    end
+  end
+
+  def test_should_not_warn_if_csrf_logging_disabled_and_not_same_origin_js
+    old_logger = ActionController::Base.logger
+    logger = ActiveSupport::LogSubscriber::TestHelper::MockLogger.new
+    ActionController::Base.logger = logger
+    ActionController::Base.log_warning_on_csrf_failure = false
+
+    begin
+      assert_cross_origin_blocked { get :same_origin_js }
+
+      assert_equal 0, logger.logged(:warn).size
+    ensure
+      ActionController::Base.logger = old_logger
+      ActionController::Base.log_warning_on_csrf_failure = true
     end
   end
 
@@ -405,21 +492,22 @@ module RequestForgeryProtectionTests
   def assert_cross_origin_not_blocked
     assert_not_blocked { yield }
   end
+
+  def forgery_protection_origin_check
+    old_setting = ActionController::Base.forgery_protection_origin_check
+    ActionController::Base.forgery_protection_origin_check = true
+    begin
+      yield
+    ensure
+      ActionController::Base.forgery_protection_origin_check = old_setting
+    end
+  end
 end
 
 # OK let's get our test on
 
 class RequestForgeryProtectionControllerUsingResetSessionTest < ActionController::TestCase
   include RequestForgeryProtectionTests
-
-  setup do
-    @old_request_forgery_protection_token = ActionController::Base.request_forgery_protection_token
-    ActionController::Base.request_forgery_protection_token = :custom_authenticity_token
-  end
-
-  teardown do
-    ActionController::Base.request_forgery_protection_token = @old_request_forgery_protection_token
-  end
 
   test 'should emit a csrf-param meta tag and a csrf-token meta tag' do
     @controller.stub :form_authenticity_token, @token + '<=?' do
@@ -495,10 +583,10 @@ class PrependProtectForgeryBaseControllerTest < ActionController::TestCase
     assert_equal(expected_callback_order, @controller.called_callbacks)
   end
 
-  def test_verify_authenticity_token_is_prepended_by_default
+  def test_verify_authenticity_token_is_not_prepended_by_default
     @controller = PrependDefaultController.new
     get :index
-    expected_callback_order = ["verify_authenticity_token", "custom_action"]
+    expected_callback_order = ["custom_action", "verify_authenticity_token"]
     assert_equal(expected_callback_order, @controller.called_callbacks)
   end
 end
@@ -577,4 +665,203 @@ class CustomAuthenticityParamControllerTest < ActionController::TestCase
       ActionController::Base.logger = @old_logger
     end
   end
+end
+
+class PerFormTokensControllerTest < ActionController::TestCase
+  def setup
+    @old_request_forgery_protection_token = ActionController::Base.request_forgery_protection_token
+    ActionController::Base.request_forgery_protection_token = :custom_authenticity_token
+  end
+
+  def teardown
+    ActionController::Base.request_forgery_protection_token = @old_request_forgery_protection_token
+  end
+
+  def test_per_form_token_is_same_size_as_global_token
+    get :index
+    expected = ActionController::RequestForgeryProtection::AUTHENTICITY_TOKEN_LENGTH
+    actual = @controller.send(:per_form_csrf_token, session, '/path', 'post').size
+    assert_equal expected, actual
+  end
+
+  def test_accepts_token_for_correct_path_and_method
+    get :index
+
+    form_token = assert_presence_and_fetch_form_csrf_token
+
+    assert_matches_session_token_on_server form_token
+
+    # This is required because PATH_INFO isn't reset between requests.
+    @request.env['PATH_INFO'] = '/per_form_tokens/post_one'
+    assert_nothing_raised do
+      post :post_one, params: {custom_authenticity_token: form_token}
+    end
+    assert_response :success
+  end
+
+  def test_rejects_token_for_incorrect_path
+    get :index
+
+    form_token = assert_presence_and_fetch_form_csrf_token
+
+    assert_matches_session_token_on_server form_token
+
+    # This is required because PATH_INFO isn't reset between requests.
+    @request.env['PATH_INFO'] = '/per_form_tokens/post_two'
+    assert_raises(ActionController::InvalidAuthenticityToken) do
+      post :post_two, params: {custom_authenticity_token: form_token}
+    end
+  end
+
+  def test_rejects_token_for_incorrect_method
+    get :index
+
+    form_token = assert_presence_and_fetch_form_csrf_token
+
+    assert_matches_session_token_on_server form_token
+
+    # This is required because PATH_INFO isn't reset between requests.
+    @request.env['PATH_INFO'] = '/per_form_tokens/post_one'
+    assert_raises(ActionController::InvalidAuthenticityToken) do
+      patch :post_one, params: {custom_authenticity_token: form_token}
+    end
+  end
+
+  def test_rejects_token_for_incorrect_method_button_to
+    get :button_to, params: { form_method: 'delete' }
+
+    form_token = assert_presence_and_fetch_form_csrf_token
+
+    assert_matches_session_token_on_server form_token, 'delete'
+
+    # This is required because PATH_INFO isn't reset between requests.
+    @request.env['PATH_INFO'] = '/per_form_tokens/post_one'
+    assert_raises(ActionController::InvalidAuthenticityToken) do
+      patch :post_one, params: { custom_authenticity_token: form_token }
+    end
+  end
+
+  test "Accepts proper token for implicit post method on button_to tag" do
+    get :button_to
+
+    form_token = assert_presence_and_fetch_form_csrf_token
+
+    assert_matches_session_token_on_server form_token, 'post'
+
+    # This is required because PATH_INFO isn't reset between requests.
+    @request.env['PATH_INFO'] = '/per_form_tokens/post_one'
+    assert_nothing_raised do
+      post :post_one, params: { custom_authenticity_token: form_token }
+    end
+  end
+
+  %w{delete post patch}.each do |verb|
+    test "Accepts proper token for #{verb} method on button_to tag" do
+      get :button_to, params: { form_method: verb }
+
+      form_token = assert_presence_and_fetch_form_csrf_token
+
+      assert_matches_session_token_on_server form_token, verb
+
+      # This is required because PATH_INFO isn't reset between requests.
+      @request.env['PATH_INFO'] = '/per_form_tokens/post_one'
+      assert_nothing_raised do
+        send verb, :post_one, params: { custom_authenticity_token: form_token }
+      end
+    end
+  end
+
+  def test_accepts_global_csrf_token
+    get :index
+
+    token = @controller.send(:form_authenticity_token)
+
+    # This is required because PATH_INFO isn't reset between requests.
+    @request.env['PATH_INFO'] = '/per_form_tokens/post_one'
+    assert_nothing_raised do
+      post :post_one, params: {custom_authenticity_token: token}
+    end
+    assert_response :success
+  end
+
+  def test_ignores_params
+    get :index, params: {form_path: '/per_form_tokens/post_one?foo=bar'}
+
+    form_token = assert_presence_and_fetch_form_csrf_token
+
+    assert_matches_session_token_on_server form_token
+
+    # This is required because PATH_INFO isn't reset between requests.
+    @request.env['PATH_INFO'] = '/per_form_tokens/post_one?foo=baz'
+    assert_nothing_raised do
+      post :post_one, params: {custom_authenticity_token: form_token, baz: 'foo'}
+    end
+    assert_response :success
+  end
+
+  def test_ignores_trailing_slash_during_generation
+    get :index, params: {form_path: '/per_form_tokens/post_one/'}
+
+    form_token = assert_presence_and_fetch_form_csrf_token
+
+    # This is required because PATH_INFO isn't reset between requests.
+    @request.env['PATH_INFO'] = '/per_form_tokens/post_one'
+    assert_nothing_raised do
+      post :post_one, params: {custom_authenticity_token: form_token}
+    end
+    assert_response :success
+  end
+
+  def test_ignores_origin_during_generation
+    get :index, params: {form_path: 'https://example.com/per_form_tokens/post_one/'}
+
+    form_token = assert_presence_and_fetch_form_csrf_token
+
+    # This is required because PATH_INFO isn't reset between requests.
+    @request.env['PATH_INFO'] = '/per_form_tokens/post_one'
+    assert_nothing_raised do
+      post :post_one, params: {custom_authenticity_token: form_token}
+    end
+    assert_response :success
+  end
+
+  def test_ignores_trailing_slash_during_validation
+    get :index
+
+    form_token = assert_presence_and_fetch_form_csrf_token
+
+    # This is required because PATH_INFO isn't reset between requests.
+    @request.env['PATH_INFO'] = '/per_form_tokens/post_one/'
+    assert_nothing_raised do
+      post :post_one, params: {custom_authenticity_token: form_token}
+    end
+    assert_response :success
+  end
+
+  def test_method_is_case_insensitive
+    get :index, params: {form_method: "POST"}
+
+    form_token = assert_presence_and_fetch_form_csrf_token
+    # This is required because PATH_INFO isn't reset between requests.
+    @request.env['PATH_INFO'] = '/per_form_tokens/post_one/'
+    assert_nothing_raised do
+      post :post_one, params: {custom_authenticity_token: form_token}
+    end
+    assert_response :success
+  end
+
+  private
+    def assert_presence_and_fetch_form_csrf_token
+      assert_select 'input[name="custom_authenticity_token"]' do |input|
+        form_csrf_token = input.first['value']
+        assert_not_nil form_csrf_token
+        return form_csrf_token
+      end
+    end
+
+    def assert_matches_session_token_on_server(form_token, method = 'post')
+      actual = @controller.send(:unmask_token, Base64.strict_decode64(form_token))
+      expected = @controller.send(:per_form_csrf_token, session, '/per_form_tokens/post_one', method)
+      assert_equal expected, actual
+    end
 end

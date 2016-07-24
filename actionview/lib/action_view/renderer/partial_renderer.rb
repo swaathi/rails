@@ -1,5 +1,5 @@
 require 'action_view/renderer/partial_renderer/collection_caching'
-require 'concurrent'
+require 'concurrent/map'
 
 module ActionView
   class PartialIteration
@@ -294,7 +294,7 @@ module ActionView
 
     def render(context, options, block)
       setup(context, options, block)
-      identifier = (@template = find_partial) ? @template.identifier : @path
+      @template = find_partial
 
       @lookup_context.rendered_format ||= begin
         if @template && @template.formats.present?
@@ -305,11 +305,9 @@ module ActionView
       end
 
       if @collection
-        instrument(:collection, :identifier => identifier || "collection", :count => @collection.size) do
-          render_collection
-        end
+        render_collection
       else
-        instrument(:partial, :identifier => identifier) do
+        instrument(:partial) do
           render_partial
         end
       end
@@ -318,15 +316,17 @@ module ActionView
     private
 
     def render_collection
-      return nil if @collection.blank?
+      instrument(:collection, count: @collection.size) do |payload|
+        return nil if @collection.blank?
 
-      if @options.key?(:spacer_template)
-        spacer = find_template(@options[:spacer_template], @locals.keys).render(@view, @locals)
+        if @options.key?(:spacer_template)
+          spacer = find_template(@options[:spacer_template], @locals.keys).render(@view, @locals)
+        end
+
+        cache_collection_render(payload) do
+          @template ? collection_with_template : collection_without_template
+        end.join(spacer).html_safe
       end
-
-      cache_collection_render do
-        @template ? collection_with_template : collection_without_template
-      end.join(spacer).html_safe
     end
 
     def render_partial
@@ -337,7 +337,7 @@ module ActionView
         layout = find_template(layout.to_s, @template_keys)
       end
 
-      object ||= locals[as]
+      object = locals[as] if object.nil? # Respect object when object is false
       locals[as] = object if @has_object
 
       content = @template.render(view, locals) do |*name|
@@ -521,7 +521,7 @@ module ActionView
     def retrieve_variable(path, as)
       variable = as || begin
         base = path[-1] == "/".freeze ? "".freeze : File.basename(path)
-        raise_invalid_identifier(path) unless base =~ /\A_?(.*)(?:\.\w+)*\z/
+        raise_invalid_identifier(path) unless base =~ /\A_?(.*?)(?:\.\w+)*\z/
         $1.to_sym
       end
       if @collection

@@ -1,6 +1,7 @@
 require 'securerandom'
 require 'abstract_unit'
 require 'active_support/core_ext/string/inflections'
+require 'active_support/core_ext/regexp'
 require 'active_support/json'
 require 'active_support/time'
 require 'time_zone_test_helpers'
@@ -10,8 +11,11 @@ class TestJSONEncoding < ActiveSupport::TestCase
   include TimeZoneTestHelpers
 
   def sorted_json(json)
-    return json unless json =~ /^\{.*\}$/
-    '{' + json[1..-2].split(',').sort.join(',') + '}'
+    if json.start_with?('{') && json.end_with?('}')
+      '{' + json[1..-2].split(',').sort.join(',') + '}'
+    else
+      json
+    end
   end
 
   JSONTest::EncodingTestCases.constants.each do |class_tests|
@@ -19,8 +23,10 @@ class TestJSONEncoding < ActiveSupport::TestCase
       begin
         prev = ActiveSupport.use_standard_json_time_format
 
-        ActiveSupport.escape_html_entities_in_json  = class_tests !~ /^Standard/
-        ActiveSupport.use_standard_json_time_format = class_tests =~ /^Standard/
+        standard_class_tests = /Standard/.match?(class_tests)
+
+        ActiveSupport.escape_html_entities_in_json  = !standard_class_tests
+        ActiveSupport.use_standard_json_time_format = standard_class_tests
         JSONTest::EncodingTestCases.const_get(class_tests).each do |pair|
           assert_equal pair.last, sorted_json(ActiveSupport::JSON.encode(pair.first))
         end
@@ -420,6 +426,11 @@ EXPECTED
     zone = ActiveSupport::TimeZone['Eastern Time (US & Canada)']
     time = ActiveSupport::TimeWithZone.new(DateTime.new(2000), zone)
     assert_equal '"1999-12-31T19:00:00.000-05:00"', ActiveSupport::JSON.encode(time)
+  end
+
+  def test_exception_to_json
+    exception = Exception.new("foo")
+    assert_equal '"foo"', ActiveSupport::JSON.encode(exception)
   end
 
   protected

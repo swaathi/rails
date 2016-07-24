@@ -41,13 +41,9 @@ class I18nValidationTest < ActiveRecord::TestCase
     [ "given custom message",              {:message => "custom"},        {:message => "custom"}],
     [ "given if condition",                {:if     => lambda { true }},  {}],
     [ "given unless condition",            {:unless => lambda { false }}, {}],
-    [ "given option that is not reserved", {:format => "jpg"},            {:format => "jpg" }]
-    # TODO Add :on case, but below doesn't work, because then the validation isn't run for some reason
-    #      even when using .save instead .valid?
-    # [ "given on condition",     {on: :save},                {}]
+    [ "given option that is not reserved", {:format => "jpg"},            {:format => "jpg" }],
+    [ "given on condition",                {on: [:create, :update] },     {}]
   ]
-
-  # validates_uniqueness_of w/ mocha
 
   COMMON_CASES.each do |name, validation_options, generate_message_options|
     test "validates_uniqueness_of on generated message #{name}" do
@@ -59,8 +55,6 @@ class I18nValidationTest < ActiveRecord::TestCase
     end
   end
 
-  # validates_associated w/ mocha
-
   COMMON_CASES.each do |name, validation_options, generate_message_options|
     test "validates_associated on generated message #{name}" do
       Topic.validates_associated :replies, validation_options
@@ -69,8 +63,6 @@ class I18nValidationTest < ActiveRecord::TestCase
       end
     end
   end
-
-  # validates_associated w/o mocha
 
   def test_validates_associated_finds_custom_model_key_translation
     I18n.backend.store_translations 'en', :activerecord => {:errors => {:models => {:topic => {:attributes => {:replies => {:invalid => 'custom message'}}}}}}
